@@ -94,7 +94,7 @@ check_build_reqs:
 
 prepare: check_venv
 	rm -rf s3am
-	source deactivate && virtualenv s3am && s3am/bin/pip install s3am==2.0
+	deactivate && virtualenv s3am && s3am/bin/pip install s3am==2.0
 	mkdir -p bin
 	ln -snf ${PWD}/s3am/bin/s3am bin/
 	$(pip) install pytest==2.8.3 toil[aws]==3.3.1
