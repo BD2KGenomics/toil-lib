@@ -11,6 +11,7 @@ from toil_lib.programs import docker_call
 def download_url(url, work_dir='.', name=None, s3_key_path=None, cghub_key_path=None):
     """
     Downloads URL, can pass in file://, http://, s3://, or ftp://, gnos://cghub/analysisID, or gnos:///analysisID
+    If downloading S3 URLs, the S3AM binary must be on the PATH
 
     :param str url: URL to download from
     :param str work_dir: Directory to download file to
@@ -57,6 +58,7 @@ def _download_with_genetorrent(url, file_path, cghub_key_path):
 def s3am_upload(fpath, s3_dir, num_cores=1, s3_key_path=None):
     """
     Uploads a file to s3 via S3AM
+    S3AM binary must be on the PATH to use this function
     For SSE-C encryption: provide a path to a 32-byte file
 
     :param str fpath: Path to file to upload

@@ -14,10 +14,7 @@ kwargs = dict(
     author_email='cgl-toil@googlegroups.com',
     url="https://github.com/BD2KGenomics/toil-lib",
     install_requires=[
-        'toil==' + toil_version,
-        's3am==' + s3am_version],
-    tests_require=[
-        'pytest==2.8.3'],
+        'toil==' + toil_version],
     package_dir={'': 'src'},
     packages=find_packages('src'))
 

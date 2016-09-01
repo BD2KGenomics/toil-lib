@@ -14,17 +14,26 @@
 
 define help
 
-Supported targets: 'develop', 'sdist', 'clean', 'test', or 'pypi'.
+Supported targets: prepare, develop, sdist, clean, test, pypi.
 
-The 'develop' target creates an editable install (aka develop mode).
+Please note that all build targets require a virtualenv to be active.
 
-	make develop
+The 'prepare' target installs toil-lib's build requirements into the current virtualenv.
 
-The 'clean' target undoes the effect of 'develop', 'docs', and 'sdist'.
+The 'develop' target creates an editable install of toil-lib and its runtime requirements in the
+current virtualenv. The install is called 'editable' because changes to the source code
+immediately affect the virtualenv.
 
-The 'test' target runs Toil-lib's unit tests.
+The 'sdist' target creates a source distribution of toil-lib suitable for hot-deployment (not
+implemented yet).
 
-The 'pypi' target publishes the current commit of Toil to PyPI after enforcing that the working
+The 'clean' target undoes the effect of 'develop', and 'sdist'.
+
+The 'test' target runs toil-lib's unit tests. Set the 'tests' variable to run a particular test, e.g.
+
+	make test tests=src/toil/test/sort/sortTest.py::SortTest::testSort
+
+The 'pypi' target publishes the current commit of toil-lib to PyPI after enforcing that the working
 copy and the index are clean, and tagging it as an unstable .dev build.
 
 endef
@@ -46,6 +55,7 @@ red=\033[0;31m
 develop: check_venv
 	$(pip) install -e .$(extras)
 clean_develop: check_venv
+	- $(pip) uninstall -y toil
 	- rm -rf src/*.egg-info
 
 
@@ -55,26 +65,42 @@ clean_sdist:
 	- rm -rf dist
 
 
-test: check_venv
-	$(python) setup.py test --pytest-args "-vv $(tests) --junitxml=test-report.xml"
+test: check_venv check_build_reqs
+	PATH=$$PATH:${PWD}/bin $(python) -m pytest -vv --junitxml test-report.xml $(tests)
+
+integration-test: check_venv check_build_reqs sdist
+	TOIL_TEST_INTEGRATIVE=True $(python) run_tests.py integration-test $(tests)
 
 
 pypi: check_venv check_clean_working_copy check_running_on_jenkins
-	test "$$ghprbActualCommit" \
-	&& echo "We're building a PR, skipping PyPI." || ( \
-		set -x \
-		&& tag_build=`$(python) -c 'pass;\
-			from version import version as v;\
-			from pkg_resources import parse_version as pv;\
-			import os;\
-			print "--tag-build=.dev" + os.getenv("BUILD_NUMBER") if pv(v).is_prerelease else ""'` \
-		&& $(python) setup.py egg_info $$tag_build sdist bdist_egg upload )
+	set -x \
+	&& tag_build=`$(python) -c 'pass;\
+		from version import version as v;\
+		from pkg_resources import parse_version as pv;\
+		import os;\
+		print "--tag-build=.dev" + os.getenv("BUILD_NUMBER") if pv(v).is_prerelease else ""'` \
+	&& $(python) setup.py egg_info $$tag_build sdist bdist_egg upload
 clean_pypi:
 	- rm -rf build/
 
 
-clean: clean_develop clean_sdist clean_pypi
+clean: clean_develop clean_sdist clean_pypi clean_prepare
 
+
+check_build_reqs:
+	@$(python) -c 'import pytest' \
+		|| ( echo "$(red)Build requirements are missing. Run 'make prepare' to install them.$(normal)" ; false )
+
+
+prepare: check_venv
+	rm -rf s3am
+	source deactivate && virtualenv s3am && s3am/bin/pip install s3am==2.0
+	mkdir -p bin
+	ln -snf ${PWD}/s3am/bin/s3am bin/
+	$(pip) install pytest==2.8.3 toil[aws]==3.3.1
+clean_prepare: check_venv
+	rm -rf bin s3am
+	- $(pip) uninstall -y pytest toil
 
 check_venv:
 	@$(python) -c 'import sys; sys.exit( int( not hasattr(sys, "real_prefix") ) )' \
@@ -99,6 +125,14 @@ check_running_on_jenkins:
 		|| ( echo "$(red)This target should only be invoked on Jenkins.$(normal)" ; false )
 
 
-.PHONY: help develop clean_develop sdist clean_sdist test \
-		pypi pypi_stable clean_pypi docs clean_docs clean \
-		check_venv check_clean_working_copy check_running_on_jenkins
+.PHONY: help \
+		prepare \
+		develop clean_develop \
+		sdist clean_sdist \
+		test \
+		pypi clean_pypi \
+		clean \
+		check_venv \
+		check_clean_working_copy \
+		check_running_on_jenkins \
+		check_build_reqs
