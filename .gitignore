@@ -5,4 +5,4 @@
 .eggs/
 test-report.xml
 __pycache__
-venv/
+.env/
