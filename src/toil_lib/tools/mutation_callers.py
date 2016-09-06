@@ -1,7 +1,7 @@
 import os
 from glob import glob
 
-from toil_scripts.tools import get_mean_insert_size
+from toil_lib.tools import get_mean_insert_size
 from toil_lib.files import tarball_files
 from toil_lib.programs import docker_call
 
