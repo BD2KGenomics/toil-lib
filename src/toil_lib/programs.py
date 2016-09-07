@@ -75,7 +75,7 @@ def docker_call(tool,
                     outfile = download_url(url, work_dir=work_dir, name=filename)
                 assert os.path.exists(file_path)
         return
-    
+
     base_docker_call = ['docker', 'run',
                         '--log-driver=none',
                         '-v', '{}:/data'.format(os.path.abspath(work_dir))]
@@ -131,10 +131,10 @@ class Docker(object):
     """
     A builder (https://en.wikipedia.org/wiki/Builder_pattern) for Popen objects representing a
     Docker client invocation. When building a Popen object, it distinguishes between three
-    layers, the `popen` layer, the `docker` layer and the `extra` layer. The `popen` layer
-    configures the call to Popen. The `docker` and `extra` layers then append to the first
+    layers, the `popen` layer, the `docker` layer and the `container` layer. The `popen` layer
+    configures the call to Popen. The `docker` and `container` layers then append to the first
     parameter for the Popen call (the `args` parameter), first the `docker` layer, followed by
-    the `extra` layer. The extra layer is typically used to parameterize a program running inside
+    the `container` layer. The container layer is typically used to parameterize a program running inside
     the Docker container, e.g. for `docker run` or `docker exec`. Within a layer we distinguish
     between three groups: commands, positional parameters (aka arguments) and optional parameters
     (aka options). The following example illustrates how layers and groups relate to the
@@ -144,9 +144,9 @@ class Docker(object):
                   |         Docker command
                   |         |      Docker option
                   |         |      |     Docker argument
-                  |         |      |     |         Extra command
-                  |         |      |     |         |     Extra option
-                  |         |      |     |         |     |     Extra argument
+                  |         |      |     |         Container command
+                  |         |      |     |         |     Container option
+                  |         |      |     |         |     |     Container argument
                   |         |      |     |         |     |     |      Popen option
                   |         |      |     |         |     |     |      |
     Popen( args=[ 'docker', 'run`, '-i', 'ubuntu', 'ls', '-l', '/' ], cwd='/tmp' )
@@ -154,61 +154,179 @@ class Docker(object):
     The `popen` layer does not have a group for commands.
 
     >>> (Docker()
-    ...     .docker_command('run') # invoke `docker run`
-    ...     .docker_params('ubuntu', interactive=True) # pass `--interactive` and run `ubuntu` image
-    ...     .docker_params(rm=True)  # docker() is cumulative, also pass `--rm`
-    ...     .extra_command('foo') # invoke `foo` command inside container
-    ...     .extra_params('/', bar=42) # pass `--bar=42 /` to foo
+    ...     .docker('run','ubuntu', interactive=True) # run `ubuntu` image, passing `--interactive`
+    ...     .docker_params(rm=True)  # layers are cumulative, also pass `--rm`
+    ...     .container('foo', '/', bar=42) # invoke `foo --bar=42 /` command inside the container
     ...     .popen_params(cwd='/foo/bar') # pass `cwd='/foo/bar'` to the Popen constructor
-    ...     .work_dir('/foo/bar')  # same
+    ...     .work_dir('/foo/bar')  # ditto
     ...     .build_popen_call())
     {'args': ['docker', 'run', '--interactive', '--rm', 'ubuntu', 'foo', '--bar=42', '/'], 'cwd': '/foo/bar'}
     """
 
-    def __init__(self):
+    def __init__(self, docker='docker'):
+        """
+        Construct an empty builder.
+
+        :param docker: optional path to the Docker client executable
+        """
         super(Docker, self).__init__()
         self.pipe_next = None
         self.pipe_prev = None
-        for layer in 'docker', 'popen', 'extra':
+        for layer in 'docker', 'popen', 'container':
             for group in 'cmds', 'args', 'opts':
                 setattr(self, self._attribute_name(layer, group), [])
-        self.popen_params('docker')
+        self._popen_args.append(docker)
 
     def docker(self, command, *args, **opts):
+        """
+        Specify docker command to run, including options and arguments.
+
+        :param command: Docker client command to be invoked, e.g. `run`, `ps`
+
+        :param args: Command line arguments to pass to docker client command, e.g. the image name in the case of `run`.
+               See docker_params().
+
+        :param opts: Command line options to pass to docker client command, e.g. --rm in the case of `run`.
+               See docker_params().
+
+        :return: self
+        :rtype: Docker
+        """
         self.docker_command(command)
         return self.docker_params(*args, **opts)
 
-    def extra(self, command, *args, **opts):
-        self.extra_command(command)
-        return self.extra_params(*args, **opts)
+    def container(self, command, *args, **opts):
+        """
+        Specify command to run in container, including options and arguments. This should only be used when the
+        Docker client command is `run`, `create` or `exec`.
 
-    def popen_params(self, *args, **opts):
-        return self._params('popen', args, opts)
+        :param command: The first argument to the container entry point, for images that don't specify an entry point
+        this becomes the container entry point, i.e. the path to (or name of) the program to be executed inside the
+        container.
+
+        :param args: Command line arguments to be passed to the entry point. See container_params().
+
+        :param opts: Command line options to be passed to the entry point. See container_params().
+
+        :return: self
+        :rtype: Docker
+        """
+        self.container_command(command)
+        return self.container_params(*args, **opts)
+
+    def popen_params(self, **opts):
+        """
+        Specify keyword arguments for the invocation of the Popen constructor.
+        """
+        require('args' not in opts, 'Passing `args=...` is disallowed. Please use docker_params() or '
+                                    'container_params() instead.')
+        return self._params('popen', (), opts)
 
     def docker_params(self, *args, **opts):
+        """
+        Specify command line arguments and options for docker.
+
+        :param args: Command line arguments to the docker client command. Arguments are always passed after options.
+               They are sometimes referred to as positional arguments.
+
+        :param opts: Command line options, aka. flags. Each keyword argument will be treated as follows. Its name
+               will be converted to the command line option by prepending either `-`, for names of length 1,
+               or `--` otherwise. Its value will be converted to a string and appended to the option with `=` in
+               between, unless the value is a boolean. A boolean value of True will be omitted, leaving the option
+               without argument. A boolean value of False will cause all previous argument-less occurrences of that
+               option to be removed.
+
+        :return: self
+        :rtype: Docker
+
+        This builder method is cumulative. Subsequent invocations will append to the argument and options. This is
+        useful for repeating options of the same name.
+
+        While this doesn't work:
+
+        >>> Docker().docker_params(volume='/a:/tmp/a', volume='/b:/tmp/b').build_popen_call()
+        Traceback (most recent call last):
+        ...
+        SyntaxError: keyword argument repeated
+
+        This does:
+
+        >>> Docker().docker_params(volume='/a:/tmp/a').docker_params(volume='/b:/tmp/b').build_popen_call()
+        {'args': ['docker', '--volume=/a:/tmp/a', '--volume=/b:/tmp/b']}
+
+        Note that magic '__' methods can be used to shorten that even further:
+
+        >>> Docker().docker__volume('/a:/tmp/a', '/b:/tmp/b').build_popen_call()
+        {'args': ['docker', '--volume=/a:/tmp/a', '--volume=/b:/tmp/b']}
+        """
         return self._params('docker', args, opts)
 
-    def extra_params(self, *args, **opts):
-        return self._params('extra', args, opts)
+    def container_params(self, *args, **opts):
+        """
+        Specify command line options and arguments for the container entry point. Same semantics as
+        :meth:`docker_params` except that these options and arguments will occur at the end of the overall docker
+        client invocation.
+        """
+        return self._params('container', args, opts)
 
-    def docker_command(self, cmd, *cmds):
-        return self._cmds('docker', cmd, cmds)
+    def docker_command(self, cmd):
+        """
+        Specify the Docker client command to be invoked. This builder method is not cumulative: subsquent invocations
+        will override the command set by earlier ones.
 
-    def extra_command(self, cmd, *cmds):
-        return self._cmds('extra', cmd, cmds)
+        :param str cmd:
+        :return: self
+        :rtype: Docker
+        """
+        self._docker_cmds[:] = [cmd]
+        return self
+
+    def container_command(self, *cmds):
+        """
+        Specify the inital arguments to the entry point. For images that don't specify an entry point,
+        the first argument will become the entry point while all remaining arguments will be passed to the entry
+        point, at the beginning of the command line, followed by container options and container arguments (see
+        :meth:`container_params`). This builder method is not cumulative: subsquent invocations
+        will override earlier ones.
+
+        :return: self
+        :rtype: Docker
+        """
+        self._container_cmds[:] = cmds
+        return self
 
     def build_popen_call(self):
+        """
+        Assemble the parameters for the Popen constructor as currently configured. See also :meth:`build_popen`.
+
+        :return: a dictionary with keyword arguments to the Popen constructor, including the first non-keyword
+                 argument called `args`
+
+        :rtype: dict
+        """
         args, kwargs = self._build_function_call('popen')
         args.extend(self._build_program_call('docker'))
-        args.extend(self._build_program_call('extra'))
+        args.extend(self._build_program_call('container'))
         # Since we know that Popen() has only one positional argument called 'args' we can convert it into a keyword
         # argument.
         return dict(kwargs, args=args)
 
     def build_popen(self):
+        """
+        Call Popen as currently configured.
+
+        :return: a Popen instance
+        :rtype: subprocess.Popen
+        """
         return subprocess.Popen(**self.build_popen_call())
 
     def work_dir(self, path):
+        """
+        Set the working directory the docker client will be invoked in.
+
+        :return: self
+        :rtype: Docker
+        """
         return self.popen_params(cwd=path)
 
     def return_stdout(self):
@@ -225,10 +343,6 @@ class Docker(object):
             self._group(layer, group).extend(value)
         return self
 
-    def _cmds(self, layer, cmd, cmds):
-        self._group(layer, 'cmds').extend(concat(cmd, cmds))
-        return self
-
     @staticmethod
     def _attribute_name(layer, group):
         return '_%s_%s' % (layer, group)
@@ -242,32 +356,46 @@ class Docker(object):
 
     def __getattr__(self, item):
         """
+        Implements the __ magic for specifying command line options or Popen kwargs in a single
+        builder method call. This is mainly useful for specifying repeated command line options.
+        Instead of
+
+        .docker_option(env='FOO=bla').docker_option(env='BAR=bro')
+
+        you can do
+
+        .docker__env('FOO=bla', 'BAR=bro')
+
+        or even just
+
+        .docker__env(FOO='bla', BAR='bro')
+
         >>> (Docker()
-        ...     .docker('run','ubuntu')
-        ...     .docker__rm(True)
-        ...     .docker__i() # utilizing default argument
-        ...     .docker__env('FOO=bla', 'BAR=bro') # multiple arguments
-        ...     .extra__('/').extra__bar(42)
+        ...     .docker__rm() # `--rm`
+        ...     .docker__detach() # `--detach`
+        ...     .docker__detach(True) # `--detach`, again
+        ...     .docker__detach(False) # remove all preceding `--detach` occurrences (!)
+        ...     .docker__i() # `-i`
+        ...     .docker__env('A=1', 'B=2') # repeated option
+        ...     .docker__env(C=3, D=4) # repeated option, more concise
+        ...     .container__bar(42) # pass `--bar=42` to container
+        ...     .container__('/') # pass `/` to container (discouraged, use `.container_params('/')` instead)
+        ...     .container__self() # to prove that we don't conflict with Python's `self`
         ...     .build_popen_call())
-        {'args': ['docker', 'run', '--rm', '-i', '--env=FOO=bla', '--env=BAR=bro', 'ubuntu', '--bar=42', '/']}
+        {'args': ['docker', '--rm', '-i', '--env=A=1', '--env=B=2', '--env=C=3', '--env=D=4', '--bar=42', '--self', '/']}
         """
         try:
             layer, key = item.split('__', 1)
         except ValueError:
             pass
         else:
-            if layer in ('docker', 'popen', 'extra'):
-                def magic_setter(*values):
-                    if not values:
-                        values = [True]
-                    if key:
-                        group = self._group(layer, 'opts')
-                        for value in values:
-                            group.append((key, value))
-                    else:
-                        group = self._group(layer, 'args')
-                        for value in values:
-                            group.append(value)
+            if layer in ('docker', 'popen', 'container'):
+                def magic_setter(*value_args, **value_kwargs):
+                    if not value_args and not value_kwargs:
+                        value_args = [True]
+                    group = self._group(layer, 'opts' if key else 'args')
+                    for value in concat(value_args, value_kwargs.iteritems()):
+                        group.append((key, value) if key else value)
                     return self
 
                 return magic_setter
@@ -277,17 +405,20 @@ class Docker(object):
         cmds, opts, args = self._get_layer(layer)
         result = []
         result.extend(cmds)
-        for k, v in opts:
-            if len(k) == 1:
-                k = '-' + k
+        for option, value in opts:
+            if len(option) == 1:
+                option = '-' + option
             else:
-                k = '--' + k.replace('_', '-')
-            if v is True:
-                result.append(k)
-            elif v is False:
-                pass
+                option = '--' + option.replace('_', '-')
+            if value is True:
+                result.append(option)
+            elif value is False:
+                result[:] = (x for x in result if x != option)
+            elif isinstance(value, tuple) and len(value) == 2:
+                k, v = value
+                result.append(option + '=' + str(k) + '=' + str(v))
             else:
-                result.append(k + '=' + str(v))
+                result.append(option + '=' + str(value))
         result.extend(args)
         return result
 
@@ -300,8 +431,8 @@ class Docker(object):
         """
         Start the docker client process, optionally feeding it the given input.
 
-        If the pipe_to() method was used to form a chain of instances, this method returns the status of the last
-        failed process in the chain or 0 if all processes succeed. The returned stdout and
+        If the pipe_to() method was used to form a chain of instances, this method returns the
+        status of the last failed process in the chain or 0 if all processes succeed.
 
         :param file|str stdin: input to pass to processes stdin
 
@@ -309,7 +440,7 @@ class Docker(object):
                non-zero. The exception will be raise for the last process in the chain that failed.
 
         :rtype: (int,str|None,str|None)
-        :return: A tuple of the form (status,stdout, stderr)
+        :return: A tuple of the form (status, stdout, stderr)
         """
         kwargs = self.build_popen_call()
         if stdin is not None:
@@ -345,16 +476,16 @@ class Docker(object):
 
         :param Docker other: the other end of the pipe
 
-        >>> DockerRun('ubuntu', i=True).extra('find', '/etc').pipe_to(
-        ...     DockerRun('ubuntu', i=True).extra('grep', '^/etc/hosts$').pipe_to(
-        ...         DockerRun('ubuntu', i=True).return_stdout().extra('wc', l=True))).call()
+        >>> DockerRun('ubuntu', i=True).container('find', '/etc').pipe_to(
+        ...     DockerRun('ubuntu', i=True).container('grep', '^/etc/hosts$').pipe_to(
+        ...         DockerRun('ubuntu', i=True).return_stdout().container('wc', l=True))).call()
         (0, '1\\n', None)
 
         The last
 
-        >>> pipe = DockerRun('ubuntu', i=True).extra('find', '/etc').pipe_to(
-        ...     DockerRun('ubuntu', i=True).extra('grep', '^not found$').pipe_to(
-        ...         DockerRun('ubuntu', i=True).return_stdout().extra('wc', l=True)))
+        >>> pipe = DockerRun('ubuntu', i=True).container('find', '/etc').pipe_to(
+        ...     DockerRun('ubuntu', i=True).container('grep', '^not found$').pipe_to(
+        ...         DockerRun('ubuntu', i=True).return_stdout().container('wc', l=True)))
 
         >>> pipe.call()
         (1, '0\\n', None)
@@ -374,8 +505,8 @@ class Docker(object):
 class DockerRun(Docker):
     """
     >>> (DockerRun('ubuntu')
-    ...     .extra_command('ls')
-    ...     .extra_params('/dir/to/list', recursive=True)
+    ...     .container_command('ls')
+    ...     .container_params('/dir/to/list', recursive=True)
     ...     .docker_env(FOO='bla', BAR='bro')
     ...     ).build_popen_call()
     {'args': ['docker', 'run', '-e=FOO=bla', '-e=BAR=bro', 'ubuntu', 'ls', '--recursive', '/dir/to/list']}
@@ -386,17 +517,16 @@ class DockerRun(Docker):
         self.docker('run', image, **docker_opts)
 
     def docker_env(self, **env):
-        self.docker__e(*[k + '=' + v for k, v in env.iteritems()])
-        return self
+        return self.docker__e(**env)
 
 
-class DockerRunGenomicsTool(DockerRun):
+class DockerRunTool(DockerRun):
     """
     Runs an image from the cgl-docker-lib collection.
     """
 
     def __init__(self, image, mock=None):
-        super(DockerRunGenomicsTool, self).__init__(image)
+        super(DockerRunTool, self).__init__(image)
         self.mock = mock_mode() if mock is None else mock
 
     def check_inputs(self, *inputs):
