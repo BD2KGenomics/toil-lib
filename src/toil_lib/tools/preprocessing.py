@@ -49,7 +49,7 @@ def run_cutadapt(job, r1_id, r2_id, fwd_3pr_adapter, rev_3pr_adapter):
 
 def run_samtools_faidx(job, ref_id):
     """
-    Use Samtools to create reference index file
+    Use SAMtools to create reference index file
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str ref_id: FileStoreID for the reference genome
@@ -67,11 +67,11 @@ def run_samtools_faidx(job, ref_id):
 
 def run_samtools_index(job, bam):
     """
-    Runs SAMtools index to create (.bai) files
+    Runs SAMtools index to create a BAM index file
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str bam: FileStoreID of the bam file
-    :return: BAM index FileStoreID
+    :param str bam: FileStoreID of the BAM file
+    :return: FileStoreID for BAM index file
     :rtype: str
     """
     work_dir = job.fileStore.getLocalTempDir()
@@ -88,9 +88,9 @@ def run_samtools_sort(job, bam):
     """
     Sorts BAM file using SAMtools sort
 
-    :param JobFunctionWrappingJob job: Toil Job instance
-    :param str bam: BAM FileStoreID
-    :return: sorted BAM FileStoreID
+    :param JobFunctionWrappingJob job: passed automatically by Toil
+    :param str bam: FileStoreID for BAM file
+    :return: FileStoreID for sorted BAM file
     :rtype: str
     """
     work_dir = job.fileStore.getLocalTempDir()
@@ -108,11 +108,11 @@ def run_samtools_sort(job, bam):
 
 def run_picard_create_sequence_dictionary(job, ref_id):
     """
-    Use Picard-tools to create reference dictionary
+    Uses Picard to create reference sequence dictionary
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str ref_id: FileStoreID for the reference genome
-    :return: FileStoreID for reference dictionary
+    :param str ref_id: FileStoreID for the reference genome fasta file
+    :return: FileStoreID for sequence dictionary file
     :rtype: str
     """
     job.fileStore.logToMaster('Created reference dictionary')
@@ -127,12 +127,12 @@ def run_picard_create_sequence_dictionary(job, ref_id):
 
 def picard_mark_duplicates(job, bam, bai):
     """
-    Runs picardtools MarkDuplicates. Assumes the BAM file is coordinate sorted.
+    Runs Picard MarkDuplicates on a BAM file. Assumes the BAM file is coordinate sorted.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param bam: BAM FileStoreID
-    :param bai: BAI FileStoreID
-    :return: Processed BAM and BAI FilestoreIDs
+    :param bam: FileStoreID for BAM file
+    :param bai: FileStoreID for BAM index file
+    :return: FileStoreIDs for BAM and BAI files
     :rtype: tuple
     """
     work_dir = job.fileStore.getLocalTempDir()
@@ -153,6 +153,7 @@ def picard_mark_duplicates(job, bam, bai):
     docker_call(work_dir=work_dir,
                 parameters=command,
                 # picard-tools container doesn't have JAVA_OPTS variable
+                # Set TMPDIR to /data to prevent writing temporary files to /tmp
                 env={'_JAVA_OPTIONS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs={'mkdups.bam': None, 'mkdups.bai': None})
@@ -162,7 +163,7 @@ def picard_mark_duplicates(job, bam, bai):
     return bam, bai
 
 
-def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, unsafe=False):
+def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp, unsafe=False):
     """
     GATK Preprocessing Pipeline
     0: Mark Duplicates
@@ -172,16 +173,16 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
     4: Recalibrate Reads
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str bam: Sample BAM FileStoreID
-    :param str bai: Bam Index FileStoreID
-    :param str ref: Reference genome FileStoreID
-    :param str ref_dict: Reference dictionary FileStoreID
-    :param str fai: Reference index FileStoreID
-    :param str phase: 1000G Indels VCF FileStoreID
-    :param str mills: Mills Indels VCF FileStoreID
-    :param str dbsnp: dbSNP VCF FileStoreID
-    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
-    :return: BAM and BAI FileStoreIDs
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str ref: FileStoreID for reference genome fasta file
+    :param str ref_dict: FileStoreID for reference sequence dictionary file
+    :param str fai: FileStoreID for reference fasta index file
+    :param str g1k: FileStoreID for 1000 Genomes VCF file
+    :param str mills: FileStoreID for Mills VCF file
+    :param str dbsnp: FileStoreID for dbSNP VCF file
+    :param bool unsafe: If True, runs GATK tools in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: FileStoreIDs for BAM and BAI files
     :rtype: tuple(str, str)
     """
     # MarkDuplicates runs best when Xmx <= 10G
@@ -189,7 +190,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
 
     # The MarkDuplicates disk requirement depends on the input BAM and BAI files and the output
     # BAM and BAI files. The output BAM file is approximately the same size as the input BAM file.
-    mdups_disk = PromisedRequirement(lambda bam_, bai_id: 2 * (bam_.size + bai_id.size), bam, bai)
+    mdups_disk = PromisedRequirement(lambda bam_, bai_: 2 * (bam_.size + bai_.size), bam, bai)
     mdups = job.wrapJobFn(picard_mark_duplicates,
                           bam,
                           bai,
@@ -197,15 +198,17 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
                           disk=mdups_disk,
                           memory=mdups_memory)
 
-    # Get size of genome reference files for calculating disk requirements
+    # Get genome reference file sizes for calculating disk requirements
     genome_ref_size = ref.size + ref_dict.size + fai.size
 
-    # Get size of INDEL resource files and genome reference files
-    indel_ref_size = mills.size + phase.size + genome_ref_size
+    # Get INDEL resource file sizes and genome reference file sizes
+    indel_ref_size = mills.size + g1k.size + genome_ref_size
 
-    # Estimate disk resources as twice the input bam size and bai size plus reference data
-    realigner_target_disk = PromisedRequirement(lambda bam_, bai_id, ref_size:
-                                                2 * bam_.size + bai_id.size + ref_size,
+    # The RealignerTargetCreator disk requirement depends on the input BAM/BAI files, the genome reference files, and
+    # the output intervals file. The intervals file size is less than the reference file size, so estimate the interval
+    # file size as the reference file size.
+    realigner_target_disk = PromisedRequirement(lambda bam_, bai_, ref_size:
+                                                bam_.size + bai_.size + 2 * ref_size,
                                                 mdups.rv(0),
                                                 mdups.rv(1),
                                                 indel_ref_size)
@@ -214,7 +217,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
                                      mdups.rv(0),
                                      mdups.rv(1),
                                      ref, ref_dict, fai,
-                                     phase, mills,
+                                     g1k, mills,
                                      unsafe=unsafe,
                                      cores=job.cores,
                                      disk=realigner_target_disk,
@@ -223,9 +226,8 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
     # The INDEL realignment disk requirement depends on the input BAM and BAI files, the intervals
     # file, the variant resource files, and the output BAM and BAI files. Here, we assume the
     # output BAM and BAI files are approximately the same size as the input BAM and BAI files.
-    indel_realign_disk = PromisedRequirement(lambda bam_, bai_id, intervals, ref_size:
-                                             2 * (
-                                             bam_.size + bai_id.size) + intervals.size + ref_size,
+    indel_realign_disk = PromisedRequirement(lambda bam_, bai_, intervals, ref_size:
+                                             2 * (bam_.size + bai_.size) + intervals.size + ref_size,
                                              mdups.rv(0),
                                              mdups.rv(1),
                                              realigner_target.rv(),
@@ -236,7 +238,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
                                   mdups.rv(0),
                                   mdups.rv(1),
                                   ref, ref_dict, fai,
-                                  phase, mills,
+                                  g1k, mills,
                                   unsafe=unsafe,
                                   cores=job.cores,
                                   disk=indel_realign_disk,
@@ -245,10 +247,11 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
     # Get size of BQSR databases and genome reference files
     bqsr_ref_size = dbsnp.size + mills.size + genome_ref_size
 
-    # The BQSR disk requirement depends on the input BAM and BAI sizes, the reference files, and
-    # the output recalibration table size.
-    base_recal_disk = PromisedRequirement(lambda bam_, bai_id, ref_size:
-                                          2 * bam_.size + bai_id.size + ref_size,
+    # The BQSR disk requirement depends on the input BAM and BAI files, the reference files, and the output
+    # recalibration table file. The recalibration table file size is less than the reference file sizes, so use
+    # the reference file sizes to estimate the recalibration table file size.
+    base_recal_disk = PromisedRequirement(lambda bam_, bai_, ref_size:
+                                          bam_.size + bai_.size + 2 * ref_size,
                                           indel_realign.rv(0),
                                           indel_realign.rv(1),
                                           bqsr_ref_size)
@@ -263,10 +266,11 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
                                disk=base_recal_disk,
                                memory=job.memory)
 
-    # The PrintReads disk requirement depends on the bam and bai sizes, the recal table, the
-    # genome reference files, and the output bam and bai file
-    recalibrate_reads_disk = PromisedRequirement(lambda bam_, bai_id, recal, ref_size:
-                                                 2 * (bam_.size + bai_id.size) + recal.size + ref_size,
+    # The PrintReads disk requirement depends on the input BAM and BAI files, the recalibration table file, the
+    # genome reference files, and the output BAM and BAI files. The output BAM and BAI files are approximately the
+    # same size as the input BAM and BAI files.
+    recalibrate_reads_disk = PromisedRequirement(lambda bam_, bai_, recal, ref_size:
+                                                 2 * (bam_.size + bai_.size) + recal.size + ref_size,
                                                  indel_realign.rv(0),
                                                  indel_realign.rv(1),
                                                  base_recal.rv(),
@@ -290,20 +294,20 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, phase, mills, dbsn
     return recalibrate_reads.rv(0), recalibrate_reads.rv(1)
 
 
-def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, phase, mills, unsafe=False):
+def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, unsafe=False):
     """
     Creates intervals file needed for INDEL realignment
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str bam: Sample BAM FileStoreID
-    :param str bai: Bam Index FileStoreID
-    :param str ref: Reference genome FileStoreID
-    :param str ref_dict: Reference dictionary FileStoreID
-    :param str fai: Reference index FileStoreID
-    :param str phase: 1000G Indels VCF FileStoreID
-    :param str mills: Mills Indels VCF FileStoreID
-    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
-    :return: FileStoreID for the processed bam
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str ref: FileStoreID for reference genome fasta file
+    :param str ref_dict: FileStoreID for reference sequence dictionary file
+    :param str fai: FileStoreID for reference fasta index file
+    :param str g1k: FileStoreID for 1000 Genomes VCF file
+    :param str mills: FileStoreID for Mills VCF file
+    :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: FileStoreID for realignment intervals file
     :rtype: str
     """
     inputs = {'ref.fasta': ref,
@@ -311,7 +315,7 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, phase, mills
               'ref.dict': ref_dict,
               'input.bam': bam,
               'input.bai': bai,
-              '1000G.vcf': phase,
+              '1000G.vcf': g1k,
               'mills.vcf': mills}
 
     work_dir = job.fileStore.getLocalTempDir()
@@ -322,6 +326,8 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, phase, mills
     parameters = ['-T', 'RealignerTargetCreator',
                   '-R', '/data/ref.fasta',
                   '-I', '/data/input.bam',
+                  # Recommended known sites:
+                  # https://software.broadinstitute.org/gatk/guide/article?id=1247
                   '-known', '/data/1000G.vcf',
                   '-known', '/data/mills.vcf',
                   '--downsampling_type', 'NONE',
@@ -334,26 +340,27 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, phase, mills
                 outputs={'sample.intervals': None},
                 work_dir=work_dir,
                 parameters=parameters,
+                # Set TMPDIR to /data to prevent writing temporary files to /tmp
                 env=dict(JAVA_OPTS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)))
     # Write to fileStore
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
 
 
-def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, mills, unsafe=False):
+def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mills, unsafe=False):
     """
     Realigns BAM file at realignment target intervals
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str intervals: Indel interval FileStoreID
-    :param str bam: Sample BAM FileStoreID
-    :param str bai: Bam Index FileStoreID
-    :param str ref: Reference genome FileStoreID
-    :param str ref_dict: Reference dictionary FileStoreID
-    :param str fai: Reference index FileStoreID
-    :param str phase: 1000G Indels VCF FileStoreID
-    :param str mills: Mills Indels VCF FileStoreID
-    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
-    :return: FileStoreID for the processed bam
+    :param str intervals: FileStoreID for INDEL realignment intervals file
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str ref: FileStoreID for reference genome fasta file
+    :param str ref_dict: FileStoreID for reference sequence dictionary file
+    :param str fai: FileStoreID for reference fasta index file
+    :param str g1k: FileStoreID for 1000 Genomes VCF file
+    :param str mills: FileStoreID for Mills VCF file
+    :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: FileStoreIDs for realigned BAM and BAI files
     :rtype: tuple(str, str)
     """
     inputs = {'ref.fasta': ref,
@@ -362,7 +369,7 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, m
               'input.bam': bam,
               'input.bai': bai,
               'target.intervals': intervals,
-              'phase.vcf': phase,
+              '1000G.vcf': g1k,
               'mills.vcf': mills}
 
     work_dir = job.fileStore.getLocalTempDir()
@@ -373,21 +380,26 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, m
     parameters = ['-T', 'IndelRealigner',
                   '-R', '/data/ref.fasta',
                   '-I', '/data/input.bam',
-                  '-known', '/data/phase.vcf',
+                  # Recommended known sites:
+                  # https://software.broadinstitute.org/gatk/guide/article?id=1247
+                  '-known', '/data/1000G.vcf',
                   '-known', '/data/mills.vcf',
                   '-targetIntervals', '/data/target.intervals',
                   '--downsampling_type', 'NONE',
                   '-maxReads', str(720000),  # Taken from MC3 pipeline
                   '-maxInMemory', str(5400000),  # Taken from MC3 pipeline
                   '-o', '/data/output.bam']
+
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
+
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
-                outputs={'output.bam': None, 'output.bai': None},
                 work_dir=work_dir,
                 parameters=parameters,
-                env=dict(JAVA_OPTS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)))
+                # Set TMPDIR to /data to prevent writing temporary files to /tmp
+                env=dict(JAVA_OPTS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)),
+                outputs={'output.bam': None, 'output.bai': None})
 
     indel_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
     indel_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bai'))
@@ -399,15 +411,15 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
     Creates recalibration table for Base Quality Score Recalibration
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str bam: BAM FileStoreID
-    :param str bai: BAM Index FileStoreID
-    :param str ref: Reference genome FileStoreID
-    :param str ref_dict: Reference dictionary FileStoreID
-    :param str fai: Reference index FileStoreID
-    :param str dbsnp: dbSNP VCF FileStoreID
-    :param str mills: Mills VCF FileStoreID
-    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
-    :return: FileStoreID for the processed bam
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str ref: FileStoreID for reference genome fasta file
+    :param str ref_dict: FileStoreID for reference genome sequence dictionary file
+    :param str fai: FileStoreID for reference genome fasta index file
+    :param str dbsnp: FileStoreID for dbSNP VCF file
+    :param str mills: FileStoreID for Mills VCF file
+    :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: FileStoreID for the recalibration table file
     :rtype: str
     """
     inputs = {'ref.fasta': ref,
@@ -427,6 +439,8 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
                   '-nct', str(job.cores),
                   '-R', '/data/ref.fasta',
                   '-I', '/data/input.bam',
+                  # Recommended known sites:
+                  # https://software.broadinstitute.org/gatk/guide/article?id=1247
                   '-knownSites', '/data/dbsnp.vcf',
                   '-knownSites', '/data/mills.vcf',
                   '-o', '/data/recal_data.table']
@@ -439,6 +453,7 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
                 outputs={'recal_data.table': None},
                 work_dir=work_dir,
                 parameters=parameters,
+                # Set TMPDIR to /data to prevent writing temporary files to /tmp
                 env=dict(JAVA_OPTS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)))
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'recal_data.table'))
@@ -449,14 +464,13 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
     Creates BAM with recalibrated base quality scores
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str table: Recalibration table FileStoreID
-    :param str bam: Bam FileStoreID
-    :param str bai: Bam Index FileStoreID
-    :param str ref: Reference genome FileStoreID
-    :param str ref_dict: Reference dictionary FileStoreID
-    :param str fai: Reference index FileStoreID
-    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
-    :return: BAM and BAI FileStoreIDs
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str ref: FileStoreID for reference genome fasta file
+    :param str ref_dict: FileStoreID for reference genome sequence dictionary file
+    :param str fai: FileStoreID for reference genome fasta index file
+    :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: FileStoreIDs for recalibrated BAM and BAI files
     :rtype: tuple(str, str)
     """
     inputs = {'ref.fasta': ref,
@@ -486,6 +500,7 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
                 outputs={'bqsr.bam': None, 'bqsr.bai': None},
                 work_dir=work_dir,
                 parameters=parameters,
+                # Set TMPDIR to /data to prevent writing temporary files to /tmp
                 env=dict(JAVA_OPTS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)))
 
     output_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'bqsr.bam'))
