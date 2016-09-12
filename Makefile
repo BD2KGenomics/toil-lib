@@ -73,13 +73,15 @@ integration-test: check_venv check_build_reqs sdist
 
 
 pypi: check_venv check_clean_working_copy check_running_on_jenkins
+	test "$$ghprbActualCommit" \
+	&& echo "We're building a PR, skipping PyPI." || ( \
 	set -x \
 	&& tag_build=`$(python) -c 'pass;\
 		from version import version as v;\
 		from pkg_resources import parse_version as pv;\
 		import os;\
 		print "--tag-build=.dev" + os.getenv("BUILD_NUMBER") if pv(v).is_prerelease else ""'` \
-	&& $(python) setup.py egg_info $$tag_build sdist bdist_egg upload
+	&& $(python) setup.py egg_info $$tag_build sdist bdist_egg upload )
 clean_pypi:
 	- rm -rf build/
 
