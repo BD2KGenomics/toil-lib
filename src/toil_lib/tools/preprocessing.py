@@ -125,13 +125,14 @@ def run_picard_create_sequence_dictionary(job, ref_id):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
 
-def picard_mark_duplicates(job, bam, bai):
+def picard_mark_duplicates(job, bam, bai, validation_stringency='LENIENT'):
     """
-    Runs Picard MarkDuplicates on a BAM file. Assumes the BAM file is coordinate sorted.
+    Runs Picard MarkDuplicates on a BAM file. Requires that the BAM file be coordinate sorted.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param bam: FileStoreID for BAM file
-    :param bai: FileStoreID for BAM index file
+    :param str bam: FileStoreID for BAM file
+    :param str bai: FileStoreID for BAM index file
+    :param str validation_stringency: BAM file validation stringency, default is LENIENT
     :return: FileStoreIDs for BAM and BAI files
     :rtype: tuple
     """
@@ -148,7 +149,7 @@ def picard_mark_duplicates(job, bam, bai):
                'METRICS_FILE=metrics.txt',
                'ASSUME_SORTED=true',
                'CREATE_INDEX=true',
-               'VALIDATION_STRINGENCY=LENIENT']  # Ignores minor formatting issues
+               'VALIDATION_STRINGENCY=%s' % validation_stringency.upper()]
 
     docker_call(work_dir=work_dir,
                 parameters=command,
@@ -166,11 +167,11 @@ def picard_mark_duplicates(job, bam, bai):
 def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp, unsafe=False):
     """
     GATK Preprocessing Pipeline
-    0: Mark Duplicates
+    0: Mark duplicates
     1: Create INDEL realignment intervals
-    2: Realign INDELS
-    3: Recalibrate Base Quality Scores
-    4: Recalibrate Reads
+    2: Realign INDELs
+    3: Recalibrate base quality scores
+    4: Apply base score recalibration
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
@@ -185,9 +186,6 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
     :return: FileStoreIDs for BAM and BAI files
     :rtype: tuple(str, str)
     """
-    # MarkDuplicates runs best when Xmx <= 10G
-    mdups_memory = min(10737418240, job.memory)
-
     # The MarkDuplicates disk requirement depends on the input BAM and BAI files and the output
     # BAM and BAI files. The output BAM file is approximately the same size as the input BAM file.
     mdups_disk = PromisedRequirement(lambda bam_, bai_: 2 * (bam_.size + bai_.size), bam, bai)
@@ -196,7 +194,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
                           bai,
                           cores=job.cores,
                           disk=mdups_disk,
-                          memory=mdups_memory)
+                          memory=job.memory)
 
     # Get genome reference file sizes for calculating disk requirements
     genome_ref_size = ref.size + ref_dict.size + fai.size
@@ -219,7 +217,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
                                      ref, ref_dict, fai,
                                      g1k, mills,
                                      unsafe=unsafe,
-                                     cores=job.cores,
+                                     cores=1,  # RealignerTargetCreator is single threaded
                                      disk=realigner_target_disk,
                                      memory=job.memory)
 
@@ -240,7 +238,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
                                   ref, ref_dict, fai,
                                   g1k, mills,
                                   unsafe=unsafe,
-                                  cores=job.cores,
+                                  cores=1,  # IndelRealigner is single threaded
                                   disk=indel_realign_disk,
                                   memory=job.memory)
 
@@ -461,9 +459,10 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
 
 def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=False):
     """
-    Creates BAM with recalibrated base quality scores
+    Creates BAM file with recalibrated base quality scores
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
+    :param str table: FileStoreID for BQSR recalibration table file
     :param str bam: FileStoreID for BAM file
     :param str bai: FileStoreID for BAM index file
     :param str ref: FileStoreID for reference genome fasta file
