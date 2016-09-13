@@ -46,7 +46,8 @@ def gatk_select_variants(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
 
 def gatk_variant_filtration(job, vcf_id, filter_name, filter_expression, ref_fasta, ref_fai, ref_dict):
     """
-    Filters VCF file using GATK VariantFiltration.
+    Filters VCF file using GATK VariantFiltration. Fixes extra pair of quotation marks in VCF header that
+    may interfere with other VCF tools.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str vcf_id: FileStoreID for input VCF file
@@ -225,8 +226,6 @@ def gatk_apply_variant_recalibration(job,
     :return: FileStoreID for recalibrated VCF file
     :rtype: str
     """
-    mode = mode.upper()
-
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
               'genome.dict': ref_dict,
@@ -237,6 +236,8 @@ def gatk_apply_variant_recalibration(job,
     work_dir = job.fileStore.getLocalTempDir()
     for name, file_store_id in inputs.iteritems():
         job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
+
+    mode = mode.upper()
 
     # GATK recommended parameters:
     # https://software.broadinstitute.org/gatk/documentation/article?id=2805
@@ -308,43 +309,3 @@ def gatk_combine_variants(job, vcfs, ref_fasta, ref_fai, ref_dict, merge_option=
                 outputs={'merged.vcf': None})
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'merged.vcf'))
-
-
-def gatk_combine_gvcfs(job, gvcfs, ref_fasta, ref_fai, ref_dict):
-    """
-    Merges GVCF files using GATK CombineGVCFs
-
-    :param JobFunctionWrappingJob job: Toil Job instance
-    :param dict gvcfs: Dictionary of GVCF FileStoreID {sample identifier: FileStoreID}
-    :param str ref_fasta: FileStoreID for reference genome fasta
-    :param str ref_fai: FileStoreID for reference genome index file
-    :param str ref_dict: FileStoreID for reference genome sequence dictionary file
-    :return: FileStoreID for merged GVCF file
-    :rtype: str
-    """
-    job.fileStore.logToMaster('Running GATK CombineGVCFs')
-
-    inputs = {'genome.fa': ref_fasta,
-              'genome.fa.fai': ref_fai,
-              'genome.dict': ref_dict}
-    inputs.update(gvcfs)
-
-    work_dir = job.fileStore.getLocalTempDir()
-    for name, file_store_id in inputs.iteritems():
-        job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
-
-    command = ['-T', 'CombineGVCFs',
-               '-R', '/data/genome.fa',
-               '-o', '/data/merged.g.vcf']
-
-    for uuid, vcf_id in gvcfs.iteritems():
-        command.extend(['--variant', os.path.join('/data', uuid)])
-
-    docker_call(work_dir=work_dir,
-                env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
-                parameters=command,
-                tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
-                inputs=inputs.keys(),
-                outputs={'merged.g.vcf': None})
-
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'merged.g.vcf'))
