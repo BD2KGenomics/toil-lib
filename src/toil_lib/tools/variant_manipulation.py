@@ -1,5 +1,5 @@
 import os
-import subprocess
+import re
 
 from toil_lib.programs import docker_call
 
@@ -17,7 +17,7 @@ def gatk_select_variants(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
     :return: FileStoreID for filtered VCF
     :rtype: str
     """
-    job.fileStore.logToMaster('GATK SelectVariants: %s' % mode)
+    job.fileStore.logToMaster('Running GATK SelectVariants to select %ss' % mode)
 
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
@@ -44,28 +44,20 @@ def gatk_select_variants(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.vcf'))
 
 
-def gatk_variant_filtration(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
+def gatk_variant_filtration(job, vcf_id, filter_name, filter_expression, ref_fasta, ref_fai, ref_dict):
     """
-    Filters VCF file using GATK VariantFiltration. The filter expressions are based on GATK variant annotation features.
-
-    SNP Filter Expression
-    QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0
-
-    INDEL Filter Expression
-    QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0
+    Filters VCF file using GATK VariantFiltration.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str mode: variant type (SNP or INDEL)
     :param str vcf_id: FileStoreID for input VCF file
+    :param str filter_name: Name of filter for VCF header
+    :param str filter_expression: JEXL filter expression
     :param str ref_fasta: FileStoreID for reference genome fasta
     :param str ref_fai: FileStoreID for reference genome index file
     :param str ref_dict: FileStoreID for reference genome sequence dictionary file
     :return: FileStoreID for filtered VCF file
     :rtype: str
     """
-    mode = mode.upper()
-    job.fileStore.logToMaster('GATK VariantFiltration: %s' % mode)
-
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
               'genome.dict': ref_dict,
@@ -75,24 +67,15 @@ def gatk_variant_filtration(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
     for name, file_store_id in inputs.iteritems():
         job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
 
-    # GATK hard filters:
-    # https://software.broadinstitute.org/gatk/documentation/article?id=2806
-    if mode == 'SNP':
-        expression = '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || ' \
-                     'MQRankSum < -12.5 || ReadPosRankSum < -8.0"'
-
-    elif mode == 'INDEL':
-        expression = '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"'
-
-    else:
-        raise ValueError('Variant filter modes can be SNP or INDEL, got %s' % mode)
-
     command = ['-T', 'VariantFiltration',
                '-R', 'genome.fa',
                '-V', 'input.vcf',
-               '--filterExpression', expression,
-               '--filterName', 'GATK_Germline_Hard_Filter_%s' % mode,   # Documents filter in header
+               '--filterName', filter_name,   # Documents filter name in header
+               '--filterExpression', filter_expression,
                '-o', 'filtered_variants.vcf']
+
+    job.fileStore.logToMaster('Running GATK VariantFiltration using {name}: '
+                              '{expression}'.format(name=filter_name, expression=filter_expression))
 
     docker_call(work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
@@ -101,16 +84,25 @@ def gatk_variant_filtration(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
                 inputs=inputs.keys(),
                 outputs={'filtered_variants.vcf': None})
 
-    # Fix extra quotation marks in FILTER line
-    output = os.path.join(work_dir, 'filtered_variants.vcf')
-    sed_cmd = 's/"{}"/{}/'.format(expression, expression)
-    subprocess.call(['sed', '-i', sed_cmd, output])
+    # Remove extra quotation marks around filter expression.
+    malformed_header = os.path.join(work_dir, 'filtered_variants.vcf')
+    fixed_header = os.path.join(work_dir, 'fixed_header.vcf')
+    filter_regex = re.escape('"%s"' % filter_expression)
+    with open(malformed_header, 'r') as f, open(fixed_header, 'w') as g:
+        for line in f:
+            g.write(re.sub(filter_regex, filter_expression, line))
 
-    return job.fileStore.writeGlobalFile(output)
+    return job.fileStore.writeGlobalFile(fixed_header)
 
 
-def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapmap=None, omni=None, phase=None,
-                              dbsnp=None, mills=None, unsafe_mode=False):
+def gatk_variant_recalibrator(job,
+                              mode,
+                              vcf,
+                              ref_fasta, ref_fai, ref_dict,
+                              annotations,
+                              hapmap=None, omni=None, phase=None, dbsnp=None, mills=None,
+                              max_gaussians=4,
+                              unsafe_mode=False):
     """
     Runs either SNP or INDEL variant quality score recalibration using GATK VariantRecalibrator. Because the VQSR method
     models SNPs and INDELs differently, VQSR must be run separately for these variant types.
@@ -121,17 +113,18 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
     :param str ref_fasta: FileStoreID for reference genome fasta
     :param str ref_fai: FileStoreID for reference genome index file
     :param str ref_dict: FileStoreID for reference genome sequence dictionary file
+    :param list[str] annotations: List of GATK variant annotations to filter on
     :param str hapmap: FileStoreID for HapMap resource file, required for SNP VQSR
     :param str omni: FileStoreID for Omni resource file, required for SNP VQSR
     :param str phase: FileStoreID for 1000G resource file, required for SNP VQSR
     :param str dbsnp: FilesStoreID for dbSNP resource file, required for SNP and INDEL VQSR
     :param str mills: FileStoreID for Mills resource file, required for INDEL VQSR
+    :param int max_gaussians: Number of Gaussians used during training, default is 4
     :param bool unsafe_mode: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
     :return: FileStoreID for the variant recalibration table, tranche file, and plots file
     :rtype: tuple
     """
     mode = mode.upper()
-    job.fileStore.logToMaster('GATK VariantRecalibrator: %s' % mode)
 
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
@@ -143,21 +136,14 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
     # https://software.broadinstitute.org/gatk/documentation/article?id=2805
 
     # This base command includes parameters for both INDEL and SNP VQSR.
-    # DP is a recommended annotation for WGS data, but does not work well with exome data,
-    # so it is not used here.
     command = ['-T', 'VariantRecalibrator',
                '-R', 'genome.fa',
                '-input', 'input.vcf',
-               '--maxGaussians', '4',
-               '-an', 'QD',   # QualByDepth
-               '-an', 'FS',   # FisherStrand'
-               '-an', 'SOR',  # StrandOddsRatio'
-               '-an', 'ReadPosRankSum',
-               '-an', 'MQRankSum',
                '-tranche', '100.0',
                '-tranche', '99.9',
                '-tranche', '99.0',
                '-tranche', '90.0',
+               '--maxGaussians', str(max_gaussians),
                '-recalFile', 'output.recal',
                '-tranchesFile', 'output.tranches',
                '-rscriptFile', 'output.plots.R']
@@ -169,7 +155,6 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
              '-resource:omni,known=false,training=true,truth=true,prior=12.0', 'omni.vcf',
              '-resource:dbsnp,known=true,training=false,truth=false,prior=2.0', 'dbsnp.vcf',
              '-resource:1000G,known=false,training=true,truth=false,prior=10.0', '1000G.vcf',
-             '-an', 'MQ',  # RMSMappingQuality'
              '-mode', 'SNP'])
 
         inputs['hapmap.vcf'] = hapmap
@@ -190,6 +175,9 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
     else:
         raise ValueError('Variant filter modes can be SNP or INDEL, got %s' % mode)
 
+    for annotation in annotations:
+        command.extend(['-an', annotation])
+
     if unsafe_mode:
         command.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
 
@@ -197,6 +185,9 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
     work_dir = job.fileStore.getLocalTempDir()
     for name, file_store_id in inputs.iteritems():
         job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
+
+    job.fileStore.logToMaster('Running GATK VariantRecalibrator on {mode}s using the following annotations:\n'
+                              '{annotations}'.format(mode=mode, annotations='\n'.join(annotations)))
 
     docker_call(work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
@@ -211,30 +202,35 @@ def gatk_variant_recalibrator(job, mode, vcf, ref_fasta, ref_fai, ref_dict, hapm
     return recal_id, tranches_id, plots_id
 
 
-def gatk_apply_variant_recalibration(job, mode, vcf_id, recal_table, tranches, ref_fasta, ref_fai, ref_dict,
+def gatk_apply_variant_recalibration(job,
+                                     mode,
+                                     vcf,
+                                     recal_table, tranches,
+                                     ref_fasta, ref_fai, ref_dict,
+                                     ts_filter_level=99.0,
                                      unsafe_mode=False):
     """
     Applies variant quality score recalibration to VCF file using GATK ApplyRecalibration
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str mode: Determines variant recalibration mode (SNP or INDEL)
-    :param str vcf_id: FileStoreID for input VCF file
+    :param str vcf: FileStoreID for input VCF file
     :param str recal_table: FileStoreID for recalibration table file
     :param str tranches: FileStoreID for tranches file
     :param str ref_fasta: FileStoreID for reference genome fasta
     :param str ref_fai: FileStoreID for reference genome index file
     :param str ref_dict: FileStoreID for reference genome sequence dictionary file
+    :param float ts_filter_level: Sensitivity expressed as a percentage, default is 99.0
     :param bool unsafe_mode: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
     :return: FileStoreID for recalibrated VCF file
     :rtype: str
     """
     mode = mode.upper()
-    job.fileStore.logToMaster('GATK ApplyRecalibration ({} Mode)'.format(mode))
 
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
               'genome.dict': ref_dict,
-              'input.vcf': vcf_id,
+              'input.vcf': vcf,
               'recal': recal_table,
               'tranches': tranches}
 
@@ -249,13 +245,16 @@ def gatk_apply_variant_recalibration(job, mode, vcf_id, recal_table, tranches, r
                '-R', 'genome.fa',
                '-input', 'input.vcf',
                '-o', 'vqsr.vcf',
-               '-ts_filter_level', '99.0',  # Filter using second lowest tranche sensitivity
+               '-ts_filter_level', str(ts_filter_level),
                '-recalFile', 'recal',
                '-tranchesFile', 'tranches']
 
     if unsafe_mode:
         command.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
 
+    job.fileStore.logToMaster('Running GATK ApplyRecalibration on {mode}s '
+                              'with a sensitivity of {sensitivity}%'.format(mode=mode,
+                                                                            sensitivity=ts_filter_level))
     docker_call(work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
@@ -282,7 +281,7 @@ def gatk_combine_variants(job, vcfs, ref_fasta, ref_fai, ref_dict, merge_option=
     :return: FileStoreID for merged VCF file
     :rtype: str
     """
-    job.fileStore.logToMaster('GATK CombineVariants')
+    job.fileStore.logToMaster('Running GATK CombineVariants')
 
     inputs = {'genome.fa': ref_fasta,
               'genome.fa.fai': ref_fai,
