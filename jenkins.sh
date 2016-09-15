@@ -14,7 +14,7 @@ export TMPDIR
 make prepare
 make develop
 make test
-make clean
 make pypi
+make clean
 
 rm -rf .env $TMPDIR
