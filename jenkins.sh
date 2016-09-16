@@ -2,7 +2,7 @@
 
 # Create Toil venv
 rm -rf .env
-virtualenv .env
+virtualenv --no-download .env
 . .env/bin/activate
 
 # Prepare directory for temp files
