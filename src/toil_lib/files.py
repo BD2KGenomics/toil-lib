@@ -1,7 +1,9 @@
-from contextlib import closing
 import os
 import shutil
 import tarfile
+from contextlib import closing
+
+from toil_lib import require
 
 
 def tarball_files(tar_name, file_paths, output_dir='.', prefix=''):
@@ -105,3 +107,15 @@ def consolidate_tarballs_job(job, fname_to_id):
                         tarinfo.name = os.path.join(output_name, fname, os.path.basename(tarinfo.name))
                         f_out.addfile(tarinfo, fileobj=f_in_file)
     return job.fileStore.writeGlobalFile(out_tar)
+
+
+def generate_file(file_path, generate_func):
+    """
+    Checks file existance, generates file, and provides message
+    :param str file_path: File location to generate file
+    :param function generate_func: Function used to generate file
+    """
+    require(not os.path.exists(file_path), file_path + ' already exists!')
+    with open(file_path, 'w') as f:
+        f.write(generate_func())
+    print('\t{} has been generated in the current working directory.'.format(os.path.basename(file_path)))

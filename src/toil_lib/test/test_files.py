@@ -1,5 +1,7 @@
 import os
 import tarfile
+import textwrap
+
 from toil.job import Job
 
 
@@ -29,6 +31,14 @@ def test_consolidate_tarballs_job(tmpdir):
     Job.Runner.startToil(Job.wrapJobFn(_consolidate_tarball_job_setup), options)
 
 
+def test_generate_file(tmpdir):
+    from toil_lib.files import generate_file
+    work_dir = str(tmpdir)
+    test_path = os.path.join(work_dir, 'test_file')
+    generate_file(test_path, _generate_func)
+    assert open(test_path).read().strip() == 'test'
+
+
 def _consolidate_tarball_job_setup(job):
     from toil_lib.files import consolidate_tarballs_job
     # Create test file
@@ -46,3 +56,8 @@ def _consolidate_tarball_job_setup(job):
     id1 = job.fileStore.writeGlobalFile(fpath1)
     id2 = job.fileStore.writeGlobalFile(fpath2)
     job.addChildJobFn(consolidate_tarballs_job, dict(test1=id1, test2=id2))
+
+
+def _generate_func():
+    return textwrap.dedent("""
+        test""")
