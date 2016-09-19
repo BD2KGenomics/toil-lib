@@ -2,7 +2,7 @@
 
 # Create Toil venv
 rm -rf .env
-virtualenv --never-download .env
+virtualenv --no-download .env
 . .env/bin/activate
 
 # Prepare directory for temp files
@@ -14,7 +14,7 @@ export TMPDIR
 make prepare
 make develop
 make test
-make pypi
 make clean
+make pypi
 
 rm -rf .env $TMPDIR
