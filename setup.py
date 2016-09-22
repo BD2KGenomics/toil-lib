@@ -1,6 +1,7 @@
+from distutils.version import LooseVersion
 from version import version
 from setuptools import find_packages, setup
-from pkg_resources import parse_version, require, DistributionNotFound
+from pkg_resources import require, DistributionNotFound
 
 
 s3am_version = '2.0'
@@ -8,9 +9,9 @@ s3am_version = '2.0'
 
 def check_provided(distribution, min_version, max_version=None, optional=False):
     # taken from https://github.com/BD2KGenomics/toil-scripts/blob/master/setup.py
-    min_version = parse_version(min_version)
+    min_version = LooseVersion(min_version)
     if max_version is not None:
-        max_version = parse_version(max_version)
+        max_version = LooseVersion(max_version)
 
     messages = []
 
@@ -18,8 +19,8 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
     dist_missing = 'Cannot find an installed copy of the %s distribution, typically provided by Toil.' % distribution
     version_too_low = 'The installed copy of %s is out of date. It is typically provided by Toil.' % distribution
     version_too_high = 'The installed copy of %s is too new. It is typically provided by Toil.' % distribution
-    required_version = 'Setup requires version %s or higher' % (min_version,)
-    required_version += '.' if max_version is None else ', up to but not including %s.' % (max_version,)
+    required_version = 'Setup requires version %s or higher' % min_version
+    required_version += '.' if max_version is None else ', up to but not including %s.' % max_version
     install_toil = 'Installing Toil should fix this problem.'
     upgrade_toil = 'Upgrading Toil should fix this problem.'
     reinstall_dist = 'Uninstalling %s and reinstalling Toil should fix this problem.' % distribution
@@ -28,26 +29,26 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
               "that Toil provides. More on installing Toil at http://toil.readthedocs.io/en/latest/installation.html.")
     try:
         # This check will fail if the distribution or any of its dependencies are missing.
-        version = require(distribution)[0].version
+        installed_version = LooseVersion(require(distribution)[0].version)
     except DistributionNotFound:
-        version = None
+        installed_version = None
         if not optional:
             messages.extend([toil_missing if distribution == 'toil' else dist_missing, install_toil])
     else:
-        if parse_version(version) < min_version:
+        if installed_version < min_version:
             messages.extend([version_too_low, required_version,
                              upgrade_toil if distribution == 'toil' else reinstall_dist])
-        elif max_version is not None and max_version < parse_version(version):
+        elif max_version is not None and max_version < installed_version:
             messages.extend([version_too_high, required_version,
                              reinstall_toil if distribution == 'toil' else reinstall_dist])
     if messages:
         messages.append(footer)
         raise RuntimeError(' '.join(messages))
     else:
-        return version
+        return str(installed_version)
 
 
-toil_version = check_provided('toil', min_version='3.3.0', max_version='3.5.0')
+toil_version = check_provided('toil', min_version='3.5.0', max_version='3.6.0')
 
 kwargs = dict(
     name='toil-lib',
