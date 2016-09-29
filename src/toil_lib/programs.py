@@ -10,7 +10,7 @@ _log = logging.getLogger(__name__)
 
 def mock_mode():
     """
-    Checks whether the ADAM_GATK_MOCK_MODE environment variable is set.
+    Checks whether the TOIL_SCRIPTS_MOCK_MODE environment variable is set.
     In mock mode, all docker calls other than those to spin up and submit jobs to the spark cluster
     are stubbed out and dummy files are used as inputs and outputs.
     """
