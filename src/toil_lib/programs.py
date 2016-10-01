@@ -61,7 +61,7 @@ def docker_call(job,
            debugging).
            docker_call.RM will stop the container and then forcefully remove it from the system
            using `docker rm -f`.
-           The default value is None and that shadows docker_call.FORGO
+           The default value is None and that shadows docker_call.FORGO, unless rm is true.
     :param str container_name: An optional name for your container.
     :param dict mounts: A dictionary of data volumes to mount into the Docker container containing host paths
            as keys and the corresponding container paths as values
