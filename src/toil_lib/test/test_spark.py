@@ -16,6 +16,7 @@ from __future__ import absolute_import
 
 import os
 from subprocess import check_output
+import tempfile
 from unittest import TestCase, skip
 
 from toil.common import Toil
@@ -48,10 +49,9 @@ def _count(job, workers):
 
     # set up cluster
     masterHostname = spawn_spark_cluster(job,
-                                   False,
-                                   workers,
-                                   cores=1,
-                                   overrideLeaderIP=ip)
+                                         workers,
+                                         cores=1,
+                                         overrideLeaderIP=ip)
 
     job.addChildJobFn(_count_child, masterHostname)
 
@@ -80,9 +80,13 @@ class SparkTest(TestCase):
                   badWorkerFailInterval=0.05,
                   checkpoint = True):
 
+        # make workdir
+        workDir = tempfile.mkdtemp()
+        os.rmdir(workDir)
+
         # wrap _count as a job
         countJob = Job.wrapJobFn(_count, 1, checkpoint = checkpoint)
-        options = Job.Runner.getDefaultOptions(self._getTestJobStorePath())
+        options = Job.Runner.getDefaultOptions(workDir)
         options.batchSystem = 'singleMachine'
         options.badWorker = badWorker
         options.badWorkerFailInterval = badWorkerFailInterval

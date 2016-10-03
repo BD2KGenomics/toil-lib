@@ -26,14 +26,12 @@ _log = logging.getLogger(__name__)
 _SPARK_MASTER_PORT = "7077"
 
 def spawn_spark_cluster(job,
-                        sudo,
                         numWorkers,
                         cores=None,
                         memory=None,
                         disk=None,
                         overrideLeaderIP=None):
     '''
-    :param sudo: Whether this code should run docker containers with sudo.
     :param numWorkers: The number of worker nodes to have in the cluster. \
     Must be greater than or equal to 1.
     :param cores: Optional parameter to set the number of cores per node. \
@@ -41,7 +39,6 @@ def spawn_spark_cluster(job,
     the service.
     :param memory: Optional parameter to set the memory requested per node.
     :param disk: Optional parameter to set the disk requested per node.
-    :type sudo: boolean
     :type leaderMemory: int or string convertable by bd2k.util.humanize.human2bytes to an int
     :type numWorkers: int
     :type cores: int
@@ -52,15 +49,13 @@ def spawn_spark_cluster(job,
     if numWorkers < 1:
         raise ValueError("Must have more than one worker. %d given." % numWorkers)
 
-    leaderService = SparkService(sudo,
-                                 cores=cores,
+    leaderService = SparkService(cores=cores,
                                  memory=memory,
                                  disk=disk,
                                  overrideLeaderIP=overrideLeaderIP)
     leaderIP = job.addService(leaderService)
     for i in range(numWorkers):
         job.addService(WorkerService(leaderIP,
-                                     sudo,
                                      cores=cores,
                                      disk=disk,
                                      memory=memory),
@@ -103,24 +98,20 @@ class SparkService(Job.Service):
     """
 
     def __init__(self,
-                 sudo,
                  memory=None,
                  disk=None,
                  cores=None,
                  overrideLeaderIP=None):
         """
-        :param sudo: Whether this code should run docker containers with sudo.
         :param memory: The amount of memory to be requested for the Spark leader. Optional.
         :param disk: The amount of disk to be requested for the Spark leader. Optional.
         :param cores: Optional parameter to set the number of cores per node. \
         If not provided, we use the number of cores on the node that launches \
         the service.
-        :type sudo: boolean
         :type memory: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type disk: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type cores: int
         """
-        self.sudo = sudo
 
         if cores is None:
             cores = multiprocessing.cpu_count()
@@ -153,8 +144,7 @@ class SparkService(Job.Service):
                                                                  "-e", "SPARK_MASTER_IP="+self.hostname,
                                                                  "-e", "SPARK_LOCAL_DIRS=/ephemeral/spark/local",
                                                                  "-e", "SPARK_WORKER_DIR=/ephemeral/spark/work"],
-                                            tool_parameters = [self.hostname],
-                                            sudo = self.sudo,
+                                            parameters = [self.hostname],
                                             check_output = True)[:-1]
         _log.info("Started HDFS Datanode.")
         self.hdfsContainerID = docker_call(job = self,
@@ -165,8 +155,7 @@ class SparkService(Job.Service):
                                            tool = "quay.io/ucsc_cgl/apache-hadoop-master:2.6.2",
                                            docker_parameters = ["--net=host",
                                                                 "-d"],
-                                           tool_parameters = [self.hostname],
-                                           sudo = self.sudo,
+                                           parameters = [self.hostname],
                                            check_output = True)[:-1]
         
         return self.hostname
@@ -179,17 +168,13 @@ class SparkService(Job.Service):
         fileStore: Unused
         """
 
-        sudo = []
-        if self.sudo:
-            sudo = ["sudo"]
-            
-        subprocess.call(sudo + ["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
-        subprocess.call(sudo + ["docker", "stop", self.sparkContainerID])
-        subprocess.call(sudo + ["docker", "rm", self.sparkContainerID])
+        subprocess.call(["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
+        subprocess.call(["docker", "stop", self.sparkContainerID])
+        subprocess.call(["docker", "rm", self.sparkContainerID])
         _log.info("Stopped Spark master.")
 
-        subprocess.call(sudo + ["docker", "stop", self.hdfsContainerID])
-        subprocess.call(sudo + ["docker", "rm", self.hdfsContainerID])
+        subprocess.call(["docker", "stop", self.hdfsContainerID])
+        subprocess.call(["docker", "rm", self.hdfsContainerID])
         _log.info("Stopped HDFS namenode.")
 
         return
@@ -210,22 +195,19 @@ class WorkerService(Job.Service):
     Should not be called outside of `SparkService`.
     """
     
-    def __init__(self, masterIP, sudo, memory=None, cores=None, disk=None):
+    def __init__(self, masterIP, memory=None, cores=None, disk=None):
         """
-        :param sudo: Whether this code should run docker containers with sudo.
         :param memory: The memory requirement for each node in the cluster. Optional.
         :param disk: The disk requirement for each node in the cluster. Optional.
         :param cores: Optional parameter to set the number of cores per node. \
         If not provided, we use the number of cores on the node that launches \
         the service.
-        :type sudo: boolean
         :type memory: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type disk: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type cores: int
         """
 
         self.masterIP = masterIP
-        self.sudo = sudo
 
         if cores is None:
             cores = multiprocessing.cpu_count()
@@ -253,8 +235,7 @@ class WorkerService(Job.Service):
                                                                  "-e", "\"SPARK_MASTER_IP="+self.masterIP+":"+_SPARK_MASTER_PORT+"\"",
                                                                  "-e", "SPARK_LOCAL_DIRS=/ephemeral/spark/local",
                                                                  "-e", "SPARK_WORKER_DIR=/ephemeral/spark/work"],
-                                            tool_parameters = [self.masterIP+":"+_SPARK_MASTER_PORT],
-                                            sudo = self.sudo,
+                                            parameters = [self.masterIP+":"+_SPARK_MASTER_PORT],
                                             check_output = True)[:-1]
         self.__start_datanode()
         
@@ -324,8 +305,7 @@ class WorkerService(Job.Service):
                                            docker_parameters = ["--net=host",
                                                                 "-d",
                                                                 "-v", "/mnt/ephemeral/:/ephemeral/:rw"],
-                                           tool_parameters = [self.masterIP],
-                                           sudo = self.sudo,
+                                           parameters = [self.masterIP],
                                            check_output = True)[:-1]
 
 
@@ -336,18 +316,14 @@ class WorkerService(Job.Service):
         :param fileStore: Unused
         """
 
-        sudo = []
-        if self.sudo:
-            sudo = ['sudo']
-
-        subprocess.call(sudo + ["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
-        subprocess.call(sudo + ["docker", "stop", self.sparkContainerID])
-        subprocess.call(sudo + ["docker", "rm", self.sparkContainerID])
+        subprocess.call(["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
+        subprocess.call(["docker", "stop", self.sparkContainerID])
+        subprocess.call(["docker", "rm", self.sparkContainerID])
         _log.info("Stopped Spark worker.")
 
-        subprocess.call(sudo + ["docker", "exec", self.hdfsContainerID, "rm", "-r", "/ephemeral/hdfs"])
-        subprocess.call(sudo + ["docker", "stop", self.hdfsContainerID])
-        subprocess.call(sudo + ["docker", "rm", self.hdfsContainerID])
+        subprocess.call(["docker", "exec", self.hdfsContainerID, "rm", "-r", "/ephemeral/hdfs"])
+        subprocess.call(["docker", "stop", self.hdfsContainerID])
+        subprocess.call(["docker", "rm", self.hdfsContainerID])
         _log.info("Stopped HDFS datanode.")
 
         return
