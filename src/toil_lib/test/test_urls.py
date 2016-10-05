@@ -41,7 +41,6 @@ class TestUrls(unittest.TestCase):
             toil.start(A)
         assert os.path.exists(os.path.join(self.tmpdir, 'testy'))
 
-
     def test_upload_and_download_with_encryption(self):
         from toil_lib.urls import s3am_upload
         from toil_lib.urls import download_url

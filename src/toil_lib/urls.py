@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from urlparse import urlparse
 
-from toil_lib import require
+from bd2k.util.exceptions import require
 from toil_lib.programs import docker_call
 
 
@@ -72,7 +72,7 @@ def s3am_upload(job, fpath, s3_dir, num_cores=1, s3_key_path=None):
     :param int num_cores: Number of cores to use for up/download with S3AM
     :param str s3_key_path: (OPTIONAL) Path to 32-byte key to be used for SSE-C encryption
     """
-    require(s3_dir.startswith('s3://'), 'Format of s3_dir (s3://) is incorrect: %s' % s3_dir)
+    require(s3_dir.startswith('s3://'), 'Format of s3_dir (s3://) is incorrect: %s', s3_dir)
     s3_dir = os.path.join(s3_dir, os.path.basename(fpath))
     _s3am_with_retry(job=job, num_cores=num_cores, file_path=fpath, s3_url=s3_dir, mode='upload', s3_key_path=s3_key_path)
 
@@ -103,34 +103,40 @@ def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_pa
     credentials_to_mount = {os.path.join(os.path.expanduser("~"), path): os.path.join(docker_home_dir, path)
                             for path in [base_aws, base_boto]
                             if os.path.exists(os.path.join(os.path.expanduser("~"), path))}
-    dir_path = file_path.rsplit('/', 1)[0]
+    require(os.path.isabs(file_path), "'file_path' parameter must be an absolute path")
+    dir_path, file_name = file_path.rsplit('/', 1)
     # Mirror user specified paths to simplify debugging
-    mounts = {dir_path: dir_path}
+    container_dir_path = '/data' + dir_path
+    container_file = os.path.join(container_dir_path, file_name)
+    mounts = {dir_path: container_dir_path}
     if s3_key_path:
-        key_dir_path = s3_key_path.rsplit('/', 1)[0]
+        require(os.path.isabs(s3_key_path), "'s3_key_path' parameter must be an absolute path")
+        key_dir_path, key_name = s3_key_path.rsplit('/', 1)
+        container_key_dir_path = '/data' + key_dir_path
+        container_key_file = os.path.join(container_key_dir_path, key_name)
         # if the key directory is identical to the file directory this assignment is idempotent
-        mounts[key_dir_path] = key_dir_path
+        mounts[key_dir_path] = container_key_dir_path
     for k, v in credentials_to_mount.iteritems():
         mounts[k] = v
     arguments = []
     url_arguments = []
     if mode == 'upload':
         arguments.extend(['upload', '--force', '--upload-slots=%s' % num_cores, '--exists=overwrite'])
-        url_arguments.extend(['file://' + file_path, s3_url])
+        url_arguments.extend(['file://' + container_file, s3_url])
     elif mode == 'download':
         arguments.extend(['download', '--file-exists=overwrite', '--download-exists=discard'])
-        url_arguments.extend([s3_url, 'file://' + file_path])
+        url_arguments.extend([s3_url, 'file://' + container_file])
     else:
         raise ValueError('Improper mode specified. mode must be equal to "upload" or "download".')
     if s3_key_path:
-        arguments.extend(['--sse-key-is-master', '--sse-key-file', s3_key_path])
+        arguments.extend(['--sse-key-is-master', '--sse-key-file', container_key_file])
     arguments.extend(['--part-size=50M', '--download-slots=%s' % num_cores])
     # finally, add the url path arguments after all the tool parameters are set
     arguments.extend(url_arguments)
     # Pass credential-related environment variables into container
     env = {}
     if 'AWS_PROFILE' in os.environ:
-       env['AWS_PROFILE'] = os.environ['AWS_PROFILE']
+        env['AWS_PROFILE'] = os.environ['AWS_PROFILE']
     # Run s3am with retries
     retry_count = 3
     for i in xrange(retry_count):
