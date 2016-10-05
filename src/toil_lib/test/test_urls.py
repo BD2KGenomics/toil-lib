@@ -1,25 +1,15 @@
 import os
 import subprocess
 import filecmp
-import tempfile
-import unittest
 from contextlib import closing
 from uuid import uuid4
-from os.path import expanduser
 
+from toil_lib.test import DockerCallTest
 from toil.common import Toil
 from toil.job import Job
 
 
-class TestUrls(unittest.TestCase):
-
-    def setUp(self):
-        # set up mktemp
-        super(TestUrls, self).setUp()
-        home = expanduser("~") + '/'
-        self.tmpdir = tempfile.mkdtemp(prefix=home)
-        self.options = Job.Runner.getDefaultOptions(os.path.join(str(self.tmpdir), 'jobstore'))
-        self.options.clean = 'always'
+class TestUrls(DockerCallTest):
 
     def tearDown(self):
         # delete temp
