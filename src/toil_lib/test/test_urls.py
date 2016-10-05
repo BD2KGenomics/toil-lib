@@ -11,13 +11,6 @@ from toil.job import Job
 
 class TestUrls(DockerCallTest):
 
-    def tearDown(self):
-        # delete temp
-        super(TestUrls, self).tearDown()
-        for file in os.listdir(self.tmpdir):
-            os.remove(os.path.join(self.tmpdir,file))
-        os.removedirs(self.tmpdir)
-
     def test_download_url_job(self):
         from toil_lib.urls import download_url_job
         j = Job.wrapJobFn(download_url_job, 'www.google.com')

@@ -18,3 +18,10 @@ class DockerCallTest(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix=home)
         self.options = Job.Runner.getDefaultOptions(os.path.join(str(self.tmpdir), 'jobstore'))
         self.options.clean = 'always'
+
+    def tearDown(self):
+        # delete temp
+        super(DockerCallTest, self).tearDown()
+        for file in os.listdir(self.tmpdir):
+            os.remove(os.path.join(self.tmpdir, file))
+        os.removedirs(self.tmpdir)
