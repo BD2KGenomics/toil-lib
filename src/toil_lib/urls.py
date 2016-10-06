@@ -141,14 +141,13 @@ def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_pa
     retry_count = 3
     for i in xrange(retry_count):
         try:
-            docker_call(job=job, tool='quay.io/ucsc_cgl/s3am', parameters=arguments, mounts=mounts, env=env)
-        except subprocess.CalledProcessError as e:
-            # xrange is 0 based so counts from 0->retry_count-1
-            if i < (retry_count-1):
-                _log.debug('S3AM failed with exit code: %i. Retrying...', e.returncode)
-            else:
-                raise RuntimeError('S3AM failed to %s after %i retries with exit code %i and parameters %s' %
-                                   (mode, retry_count, e.returncode, arguments))
+            docker_call(job=job, tool='quay.io/ucsc_cgl/s3am:2.0--fed932897e7fd40f4ec878362e5dd6afe15caaf0',
+                        parameters=arguments, mounts=mounts, env=env)
+        except subprocess.CalledProcessError:
+            _log.debug('S3AM %s failed', mode, exc_info=True)
         else:
             _log.debug('S3AM %s succeeded', mode)
             return
+    raise RuntimeError("S3AM failed to %s after %i retries with arguments %s. Enable 'debug' "
+                       "level logging to see more information about the failed attempts." %
+                       (mode, retry_count, arguments))
