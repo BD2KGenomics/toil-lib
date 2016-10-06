@@ -63,7 +63,8 @@ kwargs = dict(
     author_email='cgl-toil@googlegroups.com',
     url="https://github.com/BD2KGenomics/toil-lib",
     package_dir={'': 'src'},
-    packages=find_packages('src'))
+    packages=find_packages('src'),
+    install_requires='ruamel.yaml==0.12.14')
 
 
 setup(**kwargs)
