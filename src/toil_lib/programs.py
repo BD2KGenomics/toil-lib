@@ -3,7 +3,7 @@ import os
 import subprocess
 import logging
 
-from toil_lib import require
+from bd2k.util.exceptions import require
 
 _log = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ def docker_call(job,
                 check_output=False,
                 mock=None,
                 defer=None,
-                container_name=None):
+                container_name=None,
+                mounts=None):
     """
     Calls Docker, passing along parameters and tool.
 
@@ -52,8 +53,8 @@ def docker_call(job,
            or a url. The value is only used if mock=True
     :param dict[str,str] docker_parameters: Parameters to pass to docker
     :param bool check_output: When True, this function returns docker's output
-    :param bool mock: Whether to run in mock mode. If this variable is unset, its value will be
-           determined by the environment variable.
+    :param bool mock: Whether to run in mock mode. If this variable is unset, its value will be determined by
+           the environment variable.
     :param int defer: What action should be taken on the container upon job completion?
            docker_call.FORGO will leave the container untouched.
            docker_call.STOP will attempt to stop the container with `docker stop` (useful for
@@ -62,6 +63,8 @@ def docker_call(job,
            using `docker rm -f`.
            The default value is None and that shadows docker_call.FORGO
     :param str container_name: An optional name for your container.
+    :param dict mounts: A dictionary of data volumes to mount into the Docker container containing host paths
+           as keys and the corresponding container paths as values
     """
     from toil_lib.urls import download_url
 
@@ -96,7 +99,7 @@ def docker_call(job,
             else:
                 file_path = os.path.join(work_dir, filename)
                 if not os.path.exists(file_path):
-                    outfile = download_url(url, work_dir=work_dir, name=filename)
+                    outfile = download_url(job, url, work_dir=work_dir, name=filename)
                 assert os.path.exists(file_path)
         return
 
@@ -105,6 +108,10 @@ def docker_call(job,
     base_docker_call = ['docker', 'run',
                         '--log-driver=none',
                         '-v', '{}:/data'.format(os.path.abspath(work_dir))]
+    if mounts:
+        require(isinstance(mounts, dict), "'mounts' parameter must be a dictionary object")
+        for k, v in mounts.iteritems():
+            base_docker_call.extend(['-v', k + ':' + v])
 
     # Defer the permission fixing function.  We call this explicitly later on in this function, but
     # we defer it as well to handle unexpected job failure.
