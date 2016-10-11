@@ -34,7 +34,7 @@ def gatk_select_variants(job, mode, vcf_id, ref_fasta, ref_fai, ref_dict):
                '-o', 'output.vcf',
                '-selectType', mode]
 
-    docker_call(work_dir=work_dir,
+    docker_call(job=job, work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
                 tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
@@ -78,7 +78,7 @@ def gatk_variant_filtration(job, vcf_id, filter_name, filter_expression, ref_fas
     job.fileStore.logToMaster('Running GATK VariantFiltration using {name}: '
                               '{expression}'.format(name=filter_name, expression=filter_expression))
 
-    docker_call(work_dir=work_dir,
+    docker_call(job=job, work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
                 tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
@@ -190,7 +190,7 @@ def gatk_variant_recalibrator(job,
     job.fileStore.logToMaster('Running GATK VariantRecalibrator on {mode}s using the following annotations:\n'
                               '{annotations}'.format(mode=mode, annotations='\n'.join(annotations)))
 
-    docker_call(work_dir=work_dir,
+    docker_call(job=job, work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
                 tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
@@ -256,7 +256,7 @@ def gatk_apply_variant_recalibration(job,
     job.fileStore.logToMaster('Running GATK ApplyRecalibration on {mode}s '
                               'with a sensitivity of {sensitivity}%'.format(mode=mode,
                                                                             sensitivity=ts_filter_level))
-    docker_call(work_dir=work_dir,
+    docker_call(job=job, work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
                 tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
@@ -301,7 +301,7 @@ def gatk_combine_variants(job, vcfs, ref_fasta, ref_fai, ref_dict, merge_option=
     for uuid, vcf_id in vcfs.iteritems():
         command.extend(['--variant', os.path.join('/data', uuid)])
 
-    docker_call(work_dir=work_dir,
+    docker_call(job=job, work_dir=work_dir,
                 env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
                 parameters=command,
                 tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
