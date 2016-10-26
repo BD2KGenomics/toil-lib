@@ -1,7 +1,6 @@
-from distutils.version import LooseVersion
 from version import version
 from setuptools import find_packages, setup
-from pkg_resources import require, DistributionNotFound
+from pkg_resources import require, DistributionNotFound, parse_version
 
 
 s3am_version = '2.0'
@@ -9,9 +8,12 @@ s3am_version = '2.0'
 
 def check_provided(distribution, min_version, max_version=None, optional=False):
     # taken from https://github.com/BD2KGenomics/toil-scripts/blob/master/setup.py
-    min_version = LooseVersion(min_version)
+    min_version = parse_version(min_version)
+    if isinstance(min_version, tuple):
+        raise RuntimeError("Setuptools version 8.0 or newer required. Update by running "
+                           "'pip install setuptools --upgrade'")
     if max_version is not None:
-        max_version = LooseVersion(max_version)
+        max_version = parse_version(max_version)
 
     messages = []
 
@@ -29,7 +31,7 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
               "that Toil provides. More on installing Toil at http://toil.readthedocs.io/en/latest/installation.html.")
     try:
         # This check will fail if the distribution or any of its dependencies are missing.
-        installed_version = LooseVersion(require(distribution)[0].version)
+        installed_version = parse_version(require(distribution)[0].version)
     except DistributionNotFound:
         installed_version = None
         if not optional:
