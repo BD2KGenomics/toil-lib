@@ -1,7 +1,6 @@
-from distutils.version import LooseVersion
 from version import version
 from setuptools import find_packages, setup
-from pkg_resources import require, DistributionNotFound
+from pkg_resources import require, DistributionNotFound, parse_version
 
 
 s3am_version = '2.0'
@@ -9,16 +8,19 @@ s3am_version = '2.0'
 
 def check_provided(distribution, min_version, max_version=None, optional=False):
     # taken from https://github.com/BD2KGenomics/toil-scripts/blob/master/setup.py
-    min_version = LooseVersion(min_version)
+    min_version = parse_version(min_version)
+    if isinstance(min_version, tuple):
+        raise RuntimeError("Setuptools version 8.0 or newer required. Update by running "
+                           "'pip install setuptools --upgrade'")
     if max_version is not None:
-        max_version = LooseVersion(max_version)
+        max_version = parse_version(max_version)
 
     messages = []
 
     toil_missing = 'Cannot find a valid installation of Toil.'
     dist_missing = 'Cannot find an installed copy of the %s distribution, typically provided by Toil.' % distribution
-    version_too_low = 'The installed copy of %s is out of date. It is typically provided by Toil.' % distribution
-    version_too_high = 'The installed copy of %s is too new. It is typically provided by Toil.' % distribution
+    version_too_low = 'The installed copy of %s is out of date.' % distribution
+    version_too_high = 'The installed copy of %s is too new.' % distribution
     required_version = 'Setup requires version %s or higher' % min_version
     required_version += '.' if max_version is None else ', up to but not including %s.' % max_version
     install_toil = 'Installing Toil should fix this problem.'
@@ -29,7 +31,7 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
               "that Toil provides. More on installing Toil at http://toil.readthedocs.io/en/latest/installation.html.")
     try:
         # This check will fail if the distribution or any of its dependencies are missing.
-        installed_version = LooseVersion(require(distribution)[0].version)
+        installed_version = parse_version(require(distribution)[0].version)
     except DistributionNotFound:
         installed_version = None
         if not optional:
@@ -48,7 +50,10 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
         return str(installed_version)
 
 
-toil_version = check_provided('toil', min_version='3.5.0', max_version='3.6.0')
+# 3.5.0a1.dev237 is the Toil version where support for deferred functions was implemented
+# this is used in Toil-lib to clean up 'zombie' docker containers
+# see https://github.com/BD2KGenomics/toil/issues/987 for more information
+toil_version = check_provided('toil', min_version='3.5.0a1.dev237', max_version='3.6.0')
 
 kwargs = dict(
     name='toil-lib',
