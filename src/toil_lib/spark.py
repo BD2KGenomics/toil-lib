@@ -121,18 +121,18 @@ class SparkService(Job.Service):
         Job.Service.__init__(self, memory=memory, cores=cores, disk=disk)
 
 
-    def start(self, fileStore):
+    def start(self, job):
         """
         Start spark and hdfs master containers
 
-        :param fileStore: Unused
+        :param job: The underlying job.
         """
 
         if self.hostname is None:
             self.hostname = subprocess.check_output(["hostname", "-f",])[:-1]
 
         _log.info("Started Spark master container.")
-        self.sparkContainerID = docker_call(job = self,
+        self.sparkContainerID = docker_call(job = job,
                                             rm = False,
                                             detached = True,
                                             defer = docker_call.STOP,
@@ -147,7 +147,7 @@ class SparkService(Job.Service):
                                             parameters = [self.hostname],
                                             check_output = True)[:-1]
         _log.info("Started HDFS Datanode.")
-        self.hdfsContainerID = docker_call(job = self,
+        self.hdfsContainerID = docker_call(job = job,
                                            rm = False,
                                            detached = True,
                                            defer = docker_call.STOP,
@@ -161,11 +161,11 @@ class SparkService(Job.Service):
         return self.hostname
 
 
-    def stop(self, fileStore):
+    def stop(self, job):
         """
         Stop and remove spark and hdfs master containers
 
-        fileStore: Unused
+        :param job: The underlying job.
         """
 
         subprocess.call(["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
@@ -215,15 +215,15 @@ class WorkerService(Job.Service):
         Job.Service.__init__(self, memory=memory, cores=cores, disk=disk)
 
 
-    def start(self, fileStore):
+    def start(self, job):
         """
         Start spark and hdfs worker containers
 
-        :param fileStore: Unused
+        :param job: The underlying job.
         """
 
         # start spark and our datanode
-        self.sparkContainerID = docker_call(job = self,
+        self.sparkContainerID = docker_call(job = job,
                                             rm = False,
                                             detached = True,
                                             defer = docker_call.STOP,
@@ -237,7 +237,7 @@ class WorkerService(Job.Service):
                                                                  "-e", "SPARK_WORKER_DIR=/ephemeral/spark/work"],
                                             parameters = [self.masterIP+":"+_SPARK_MASTER_PORT],
                                             check_output = True)[:-1]
-        self.__start_datanode()
+        self.__start_datanode(job)
         
         # fake do/while to check if HDFS is up
         hdfs_down = True
@@ -280,7 +280,7 @@ class WorkerService(Job.Service):
 
                 # todo: this is copied code. clean up!
                 _log.info("Restarting datanode.")
-                self.__start_datanode()
+                self.__start_datanode(job)
 
             else:
                 _log.info("HDFS datanode started up OK!")
@@ -292,11 +292,13 @@ class WorkerService(Job.Service):
         return
 
 
-    def __start_datanode(self):
+    def __start_datanode(self, job):
         """
         Launches the Hadoop datanode.
+
+        :param job: The underlying job.
         """
-        self.hdfsContainerID = docker_call(job = self,
+        self.hdfsContainerID = docker_call(job = job,
                                            rm = False,
                                            detached = True,
                                            defer = docker_call.STOP,
@@ -313,7 +315,7 @@ class WorkerService(Job.Service):
         """
         Stop spark and hdfs worker containers
 
-        :param fileStore: Unused
+        :param job: The underlying job.
         """
 
         subprocess.call(["docker", "exec", self.sparkContainerID, "rm", "-r", "/ephemeral/spark"])
