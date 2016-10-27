@@ -10,7 +10,7 @@ _log = logging.getLogger(__name__)
 
 def mock_mode():
     """
-    Checks whether the ADAM_GATK_MOCK_MODE environment variable is set.
+    Checks whether the TOIL_SCRIPTS_MOCK_MODE environment variable is set.
     In mock mode, all docker calls other than those to spin up and submit jobs to the spark cluster
     are stubbed out and dummy files are used as inputs and outputs.
     """
@@ -61,7 +61,7 @@ def docker_call(job,
            debugging).
            docker_call.RM will stop the container and then forcefully remove it from the system
            using `docker rm -f`.
-           The default value is None and that shadows docker_call.FORGO
+           The default value is None and that shadows docker_call.FORGO, unless rm is true.
     :param str container_name: An optional name for your container.
     :param dict mounts: A dictionary of data volumes to mount into the Docker container containing host paths
            as keys and the corresponding container paths as values
