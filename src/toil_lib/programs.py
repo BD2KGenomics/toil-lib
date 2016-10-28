@@ -99,7 +99,7 @@ def docker_call(job,
             else:
                 file_path = os.path.join(work_dir, filename)
                 if not os.path.exists(file_path):
-                    outfile = download_url(job, url, work_dir=work_dir, name=filename)
+                    outfile = download_url(job, url, work_dir=work_dir, name=filename, mock=False)
                 assert os.path.exists(file_path)
         return
 
