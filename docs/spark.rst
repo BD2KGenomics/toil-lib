@@ -73,11 +73,14 @@ We also take several optional parameters:
 - disk: The amount of disk to request for each worker.
 
 When launching a Spark cluster, there is one important caveat: the job that
-launches the services must be executed with `checkpoint = True`. If the job is
+launches the services must be executed with `checkpoint = True`. See the Toil
+documentation on `checkpoints`_ for details on how to do this. If the job is
 not checkpointable, then the cluster may not restart robustly. This is important
 if you are running on a preemptable cluster: in Spark and HDFS, failed workers can
 be restarted, but a failed master will cause all workers in the cluster to
 dissociate. If the cluster does not restart, this causes a deadlock.
+
+.. checkpoints_: http://toil.readthedocs.io/en/releases-3.3.x/developing.html#checkpoints
 
 Using Locally
 -------------
