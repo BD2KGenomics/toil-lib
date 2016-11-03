@@ -1,6 +1,11 @@
 import argparse
 import os
 import tempfile
+import logging
+import re
+import subprocess
+
+log = logging.getLogger(__name__)
 
 def flatten(x):
     """
@@ -38,6 +43,8 @@ def partitions(l, partition_size):
 class UserError(Exception):
     pass
 
+class NotInsideContainerError(Exception):
+    pass
 
 def require(expression, message):
     if not expression:
@@ -61,3 +68,55 @@ def required_length(nmin, nmax):
                 raise argparse.ArgumentTypeError(msg)
             setattr(args, self.dest, values)
     return RequiredLength
+
+
+def inside_docker_container():
+    """
+    Returns True if this method is called inside a Docker container.
+    """
+    try:
+        current_docker_container_id()
+    except NotInsideContainerError:
+        return False
+    else:
+        return True
+
+
+def dockerd_is_reachable():
+    """
+    Returns True if the docker daemon is reachable from the docker client.
+    """
+    try:
+        subprocess.check_call(['docker', 'info'])
+    except subprocess.CalledProcessError:
+        log.exception('')
+        return False
+    else:
+        return True
+
+
+def current_docker_container_id():
+    """
+    Returns a string that represents the container ID of the current Docker container. If this
+    function is invoked outside of a container a NotInsideContainerError is raised.
+
+    >>> import subprocess
+    >>> import sys
+    >>> a = subprocess.check_output(['docker', 'run', '-v',
+    ...                              sys.modules[__name__].__file__ + ':/foo.py',
+    ...                              'python:2.7.12','python', '-c',
+    ...                              'from foo import current_docker_container_id;\\
+    ...                               print current_docker_container_id()'])
+    int call will fail if a is not a valid hex string
+    >>> int(a, 16) > 0
+    True
+    """
+    try:
+        with open('/proc/1/cgroup', 'r') as readable:
+            raw = readable.read()
+        ids = set(re.compile('[0-9a-f]{12,}').findall(raw))
+        assert len(ids) == 1
+        return ids.pop()
+    except:
+        logging.exception('Failed to obtain current container ID')
+        raise NotInsideContainerError()
