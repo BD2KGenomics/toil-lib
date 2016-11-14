@@ -102,6 +102,7 @@ def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
 
     :param bool sort: If True, sorts the BAM
     :param bool trim: If True, performs adapter trimming
+    :param bool mark_secondary: If True, mark shorter split reads as secondary
     :return: FileStoreID of BAM
     :rtype: str
     """
