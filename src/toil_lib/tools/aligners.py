@@ -67,7 +67,7 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
         return transcriptome_id, sorted_id, log_id
 
 
-def run_bwakit(job, config, sort=True, trim=False):
+def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     """
     Runs BWA-Kit to align single or paired-end fastq files or realign SAM/BAM files.
 
@@ -154,6 +154,8 @@ def run_bwakit(job, config, sort=True, trim=False):
         opt_args.append('-s')
     if trim:
         opt_args.append('-a')
+    if mark_secondary:
+        opt_args.append('-M')
     # Call: bwakit
     parameters = ['-t', str(job.cores)] + opt_args + ['-o', '/data/aligned', '/data/ref.fa']
     if rg is not None:
@@ -163,7 +165,7 @@ def run_bwakit(job, config, sort=True, trim=False):
     mock_bam = config.uuid + '.bam'
     outputs = {'aligned.aln.bam': mock_bam}
 
-    docker_call(job=job, tool='quay.io/ucsc_cgl/bwakit:0.7.12--528bb9bf73099a31e74a7f5e6e3f2e0a41da486e',
+    docker_call(job=job, tool='quay.io/jpfeil/bwakit:0.7.12--a3d845c4df9770b9c9cff7d49483bb0a1ed51bdd',
                 parameters=parameters, inputs=inputs.keys(), outputs=outputs, work_dir=work_dir)
 
     # Either write file to local output directory or upload to S3 cloud storage

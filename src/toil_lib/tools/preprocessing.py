@@ -193,6 +193,7 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
     mdups = job.wrapJobFn(picard_mark_duplicates,
                           bam,
                           bai,
+                          validation_stringency='SILENT',
                           cores=job.cores,
                           disk=mdups_disk,
                           memory=job.memory)
