@@ -102,8 +102,8 @@ def run_rsem_postprocess(job, rsem_gene_id, rsem_isoform_id):
     """
     work_dir = job.fileStore.getLocalTempDir()
     # I/O
-    genes = job.fileStore.readGlobalFile(rsem_gene_id, os.path.join(work_dir, 'rsem_genes.results'), mutable=True)
-    iso = job.fileStore.readGlobalFile(rsem_isoform_id, os.path.join(work_dir, 'rsem_isoforms.results'), mutable=True)
+    genes = job.fileStore.readGlobalFile(rsem_gene_id, os.path.join(work_dir, 'rsem_genes.results'))
+    iso = job.fileStore.readGlobalFile(rsem_isoform_id, os.path.join(work_dir, 'rsem_isoforms.results'))
     # Perform HUGO gene / isoform name mapping
     command = ['-g', genes, '-i', iso]
     docker_call(tool='quay.io/ucsc_cgl/gencode_hugo_mapping:1.0--cb4865d02f9199462e66410f515c4dabbd061e4d',
