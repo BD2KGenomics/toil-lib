@@ -82,22 +82,19 @@ def run_rsem(job, bam_id, rsem_ref_url, paired=True):
         parameters = ['--paired-end'] + parameters
     docker_call(job=job, tool='quay.io/ucsc_cgl/rsem:1.2.25--d4275175cc8df36967db460b06337a14f40d2f21',
                 parameters=parameters, work_dir=work_dir)
-    os.rename(os.path.join(work_dir, output_prefix + '.genes.results'), os.path.join(work_dir, 'rsem_gene.tab'))
-    os.rename(os.path.join(work_dir, output_prefix + '.isoforms.results'), os.path.join(work_dir, 'rsem_isoform.tab'))
     # Write to FileStore
-    gene_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rsem_gene.tab'))
-    isoform_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rsem_isoform.tab'))
+    gene_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, output_prefix + '.genes.results'))
+    isoform_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, output_prefix + '.isoforms.results'))
     return gene_id, isoform_id
 
 
-def run_rsem_postprocess(job, uuid, rsem_gene_id, rsem_isoform_id):
+def run_rsem_postprocess(job, rsem_gene_id, rsem_isoform_id):
     """
     Parses RSEMs output to produce the separate .tab files (TPM, FPKM, counts) for both gene and isoform.
     These are two-column files: Genes and Quantifications.
     HUGO files are also provided that have been mapped from Gencode/ENSEMBLE names.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
-    :param str uuid: UUID to mark the samples with
     :param str rsem_gene_id: FileStoreID of rsem_gene_ids
     :param str rsem_isoform_id: FileStoreID of rsem_isoform_ids
     :return: FileStoreID from RSEM post process tarball
@@ -105,23 +102,16 @@ def run_rsem_postprocess(job, uuid, rsem_gene_id, rsem_isoform_id):
     """
     work_dir = job.fileStore.getLocalTempDir()
     # I/O
-    job.fileStore.readGlobalFile(rsem_gene_id, os.path.join(work_dir, 'rsem_gene.tab'), mutable=True)
-    job.fileStore.readGlobalFile(rsem_isoform_id, os.path.join(work_dir, 'rsem_isoform.tab'), mutable=True)
-    # Convert RSEM files into individual .tab files.
-    docker_call(job=job, tool='jvivian/rsem_postprocess', parameters=[uuid], work_dir=work_dir)
-    os.rename(os.path.join(work_dir, 'rsem_gene.tab'), os.path.join(work_dir, 'rsem_genes.results'))
-    os.rename(os.path.join(work_dir, 'rsem_isoform.tab'), os.path.join(work_dir, 'rsem_isoforms.results'))
-    output_files = ['rsem.genes.norm_counts.tab', 'rsem.genes.raw_counts.tab', 'rsem.isoform.norm_counts.tab',
-                    'rsem.isoform.raw_counts.tab', 'rsem_genes.results', 'rsem_isoforms.results']
+    genes = job.fileStore.readGlobalFile(rsem_gene_id, os.path.join(work_dir, 'rsem_genes.results'), mutable=True)
+    iso = job.fileStore.readGlobalFile(rsem_isoform_id, os.path.join(work_dir, 'rsem_isoforms.results'), mutable=True)
     # Perform HUGO gene / isoform name mapping
-    genes = [x for x in output_files if 'rsem.genes' in x]
-    isoforms = [x for x in output_files if 'rsem.isoform' in x]
-    command = ['-g'] + genes + ['-i'] + isoforms
-    docker_call(job=job, tool='jvivian/gencode_hugo_mapping', parameters=command, work_dir=work_dir)
-    hugo_files = [os.path.splitext(x)[0] + '.hugo' + os.path.splitext(x)[1] for x in genes + isoforms]
+    command = ['-g', genes, '-i', iso]
+    docker_call(job=job, tool='quay.io/ucsc_cgl/gencode_hugo_mapping:1.0--cb4865d02f9199462e66410f515c4dabbd061e4d',
+                parameters=command, work_dir=work_dir)
+    hugo_files = [os.path.join(work_dir, x) for x in ['rsem_genes.hugo.results', 'rsem_isoforms.hugo.results']]
     # Create tarballs for outputs
-    tarball_files('rsem.tar.gz', file_paths=[os.path.join(work_dir, x) for x in output_files], output_dir=work_dir)
-    tarball_files('rsem_hugo.tar.gz', [os.path.join(work_dir, x) for x in hugo_files], output_dir=work_dir)
+    tarball_files('rsem.tar.gz', file_paths=[os.path.join(work_dir, x) for x in [genes, iso]], output_dir=work_dir)
+    tarball_files('rsem_hugo.tar.gz', file_paths=[os.path.join(work_dir, x) for x in hugo_files], output_dir=work_dir)
     rsem_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rsem.tar.gz'))
     hugo_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rsem_hugo.tar.gz'))
     return rsem_id, hugo_id
