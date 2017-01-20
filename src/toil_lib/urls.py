@@ -6,13 +6,13 @@ import subprocess
 from urlparse import urlparse
 
 from bd2k.util.exceptions import require
-from toil_lib.programs import docker_call
+from toil.lib.docker import dockerCall
 
 
 _log = logging.getLogger(__name__)
 
 
-def download_url(job, url, work_dir='.', name=None, s3_key_path=None, cghub_key_path=None, mock=None):
+def download_url(job, url, work_dir='.', name=None, s3_key_path=None, cghub_key_path=None):
     """
     Downloads URL, can pass in file://, http://, s3://, or ftp://, gnos://cghub/analysisID, or gnos:///analysisID
     If downloading S3 URLs, the S3AM binary must be on the PATH
@@ -23,15 +23,14 @@ def download_url(job, url, work_dir='.', name=None, s3_key_path=None, cghub_key_
     :param str name: Name of output file, if None, basename of URL is used
     :param str s3_key_path: Path to 32-byte encryption key if url points to S3 file that uses SSE-C
     :param str cghub_key_path: Path to cghub key used to download from CGHub.
-    :param bool mock: Whether to run docker calls in mock_mode. See :func:`toil_lib.programs.docker_call`
     :return: Path to the downloaded file
     :rtype: str
     """
     file_path = os.path.join(work_dir, name) if name else os.path.join(work_dir, os.path.basename(url))
     if cghub_key_path:
-        _download_with_genetorrent(job, url, file_path, cghub_key_path, mock=mock)
+        _download_with_genetorrent(job, url, file_path, cghub_key_path)
     elif urlparse(url).scheme == 's3':
-        _s3am_with_retry(job, num_cores=1, file_path=file_path, s3_url=url, mode='download', s3_key_path=s3_key_path, mock=mock)
+        _s3am_with_retry(job, num_cores=1, file_path=file_path, s3_url=url, mode='download', s3_key_path=s3_key_path)
     elif urlparse(url).scheme == 'file':
         shutil.copy(urlparse(url).path, file_path)
     else:
@@ -48,15 +47,15 @@ def download_url_job(job, url, name=None, s3_key_path=None, cghub_key_path=None)
     return job.fileStore.writeGlobalFile(fpath)
 
 
-def _download_with_genetorrent(job, url, file_path, cghub_key_path, mock=None):
+def _download_with_genetorrent(job, url, file_path, cghub_key_path):
     parsed_url = urlparse(url)
     analysis_id = parsed_url.path[1:]
     assert parsed_url.scheme == 'gnos', 'Improper format. gnos://cghub/ID. User supplied: {}'.format(parsed_url)
     work_dir = os.path.dirname(file_path)
     folder_path = os.path.join(work_dir, os.path.basename(analysis_id))
     parameters = ['-vv', '-c', cghub_key_path, '-d', analysis_id]
-    docker_call(job=job, tool='quay.io/ucsc_cgl/genetorrent:3.8.7--9911761265b6f08bc3ef09f53af05f56848d805b',
-                work_dir=work_dir, parameters=parameters, mock=mock)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/genetorrent:3.8.7--9911761265b6f08bc3ef09f53af05f56848d805b',
+               workDir=work_dir, parameters=parameters)
     sample = glob.glob(os.path.join(folder_path, '*tar*'))
     assert len(sample) == 1, 'More than one sample tar in CGHub download: {}'.format(analysis_id)
 
@@ -75,7 +74,8 @@ def s3am_upload(job, fpath, s3_dir, num_cores=1, s3_key_path=None):
     """
     require(s3_dir.startswith('s3://'), 'Format of s3_dir (s3://) is incorrect: %s', s3_dir)
     s3_dir = os.path.join(s3_dir, os.path.basename(fpath))
-    _s3am_with_retry(job=job, num_cores=num_cores, file_path=fpath, s3_url=s3_dir, mode='upload', s3_key_path=s3_key_path)
+    _s3am_with_retry(job=job, num_cores=num_cores, file_path=fpath,
+                     s3_url=s3_dir, mode='upload', s3_key_path=s3_key_path)
 
 
 def s3am_upload_job(job, file_id, file_name, s3_dir, s3_key_path=None):
@@ -85,7 +85,7 @@ def s3am_upload_job(job, file_id, file_name, s3_dir, s3_key_path=None):
     s3am_upload(job=job, fpath=fpath, s3_dir=s3_dir, num_cores=job.cores, s3_key_path=s3_key_path)
 
 
-def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_path=None, mock=None):
+def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_path=None):
     """
     Run s3am with 3 retries
 
@@ -95,8 +95,8 @@ def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_pa
     :param str s3_url: S3 URL
     :param str mode: Mode to run s3am in. Either "upload" or "download"
     :param str s3_key_path: Path to the SSE-C key if using encryption
-    :param bool mock: Whether to run docker calls in mock_mode. See :func:`toil_lib.programs.docker_call`
     """
+    container_key_file = None
     # try to find suitable credentials
     base_boto = '.boto'
     base_aws = '.aws/credentials'
@@ -139,12 +139,20 @@ def _s3am_with_retry(job, num_cores, file_path, s3_url, mode='upload', s3_key_pa
     env = {}
     if 'AWS_PROFILE' in os.environ:
         env['AWS_PROFILE'] = os.environ['AWS_PROFILE']
+    # Create parameters to pass to Docker
+    docker_parameters = ['--rm', '--log-driver', 'none']
+    if mounts:
+        for k, v in mounts.iteritems():
+            docker_parameters.extend(['-v', k + ':' + v])
+    if env:
+        for e, v in env.iteritems():
+            docker_parameters.extend(['-e', '{}={}'.format(e, v)])
     # Run s3am with retries
     retry_count = 3
     for i in xrange(retry_count):
         try:
-            docker_call(job=job, tool='quay.io/ucsc_cgl/s3am:2.0--fed932897e7fd40f4ec878362e5dd6afe15caaf0',
-                        parameters=arguments, mounts=mounts, env=env, mock=mock)
+            dockerCall(job=job, tool='quay.io/ucsc_cgl/s3am:2.0--fed932897e7fd40f4ec878362e5dd6afe15caaf0',
+                       parameters=arguments, dockerParameters=docker_parameters)
         except subprocess.CalledProcessError:
             _log.debug('S3AM %s failed', mode, exc_info=True)
         else:
