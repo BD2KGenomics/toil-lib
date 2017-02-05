@@ -67,7 +67,7 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
         return transcriptome_id, sorted_id, log_id
 
 
-def run_bwakit(job, config, sort=True, trim=False, mark_secondary=True):
+def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     """
     Runs BWA-Kit to align single or paired-end fastq files or realign SAM/BAM files.
 
