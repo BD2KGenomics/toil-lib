@@ -1,7 +1,7 @@
 import os
 import tarfile
 
-from toil_lib.programs import docker_call
+from toil.lib.docker import dockerCall
 
 
 def gatk_genotype_gvcfs(job,
@@ -62,12 +62,12 @@ def gatk_genotype_gvcfs(job,
                                                              annotations='\n'.join(annotations) if annotations else '',
                                                              samples='\n'.join(gvcfs.keys())))
 
-    docker_call(job=job, work_dir=work_dir,
-                env={'JAVA_OPTS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
-                parameters=command,
-                tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
-                inputs=inputs.keys(),
-                outputs={'genotyped.vcf': None})
+    docker_parameters = ['--rm', 'log-driver', 'none',
+                         '-e', 'JAVA_OPTS=-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)]
+    dockerCall(job=job, workDir=work_dir,
+               parameters=command,
+               tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
+               dockerParameters=docker_parameters)
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'genotyped.vcf'))
 
@@ -107,11 +107,11 @@ def run_oncotator(job, vcf_id, oncotator_db):
                'annotated.vcf',
                'hg19']  # Oncotator annotations are based on hg19
 
-    docker_call(job=job, work_dir=work_dir,
-                env={'_JAVA_OPTIONS': '-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)},
-                parameters=command,
-                tool='jpfeil/oncotator:1.9--8fffc356981862d50cfacd711b753700b886b605',
-                inputs=inputs.keys(),
-                outputs={'annotated.vcf': None})
+    docker_parameters = ['--rm', 'log-driver', 'none',
+                         '-e', 'JAVA_OPTS=-Djava.io.tmpdir=/data/ -Xmx{}'.format(job.memory)]
+    dockerCall(job=job, workDir=work_dir,
+               parameters=command,
+               tool='jpfeil/oncotator:1.9--8fffc356981862d50cfacd711b753700b886b605',
+               dockerParameters=docker_parameters)
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'annotated.vcf'))

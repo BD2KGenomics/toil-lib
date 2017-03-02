@@ -50,10 +50,8 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
         return str(installed_version)
 
 
-# 3.5.0a1.dev237 is the Toil version where support for deferred functions was implemented
-# this is used in Toil-lib to clean up 'zombie' docker containers
-# see https://github.com/BD2KGenomics/toil/issues/987 for more information
-toil_version = check_provided('toil', min_version='3.5.0a1.dev237', max_version='3.6.0')
+# 3.5.0 is the Toil version which contains support for Docker call
+toil_version = check_provided('toil', min_version='3.5.0', max_version='3.6.0')
 
 kwargs = dict(
     name='toil-lib',

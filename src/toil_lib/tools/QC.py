@@ -1,7 +1,8 @@
 import os
 
+from toil.lib.docker import dockerCall
+
 from toil_lib.files import tarball_files
-from toil_lib.programs import docker_call
 
 
 def run_fastqc(job, r1_id, r2_id):
@@ -22,8 +23,8 @@ def run_fastqc(job, r1_id, r2_id):
         job.fileStore.readGlobalFile(r2_id, os.path.join(work_dir, 'R2.fastq'))
         parameters.extend(['-t', '2', '/data/R2.fastq'])
         output_names.extend(['R2_fastqc.html', 'R2_fastqc.zip'])
-    docker_call(job=job, tool='quay.io/ucsc_cgl/fastqc:0.11.5--be13567d00cd4c586edf8ae47d991815c8c72a49',
-                work_dir=work_dir, parameters=parameters)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/fastqc:0.11.5--be13567d00cd4c586edf8ae47d991815c8c72a49',
+               workDir=work_dir, parameters=parameters)
     output_files = [os.path.join(work_dir, x) for x in output_names]
     tarball_files(tar_name='fastqc.tar.gz', file_paths=output_files, output_dir=work_dir)
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'fastqc.tar.gz'))
