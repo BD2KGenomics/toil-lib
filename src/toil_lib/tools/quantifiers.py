@@ -25,20 +25,21 @@ def run_kallisto(job, r1_id, r2_id, kallisto_index_url):
                   '-i', '/data/kallisto_hg38.idx',
                   '-t', str(job.cores),
                   '-o', '/data/',
-                  '-b', '100']
+                  '-b', '100',
+                  '--fusion']
     if r1_id and r2_id:
-        job.fileStore.readGlobalFile(r1_id, os.path.join(work_dir, 'R1_cutadapt.fastq'))
-        job.fileStore.readGlobalFile(r2_id, os.path.join(work_dir, 'R2_cutadapt.fastq'))
-        parameters.extend(['/data/R1_cutadapt.fastq', '/data/R2_cutadapt.fastq'])
+        job.fileStore.readGlobalFile(r1_id, os.path.join(work_dir, 'R1.fastq'))
+        job.fileStore.readGlobalFile(r2_id, os.path.join(work_dir, 'R2.fastq'))
+        parameters.extend(['/data/R1.fastq', '/data/R2.fastq'])
     else:
-        job.fileStore.readGlobalFile(r1_id, os.path.join(work_dir, 'R1_cutadapt.fastq'))
-        parameters.extend(['--single', '-l', '200', '-s', '15', '/data/R1_cutadapt.fastq'])
+        job.fileStore.readGlobalFile(r1_id, os.path.join(work_dir, 'R1.fastq'))
+        parameters.extend(['--single', '-l', '200', '-s', '15', '/data/R1.fastq'])
 
     # Call: Kallisto
-    docker_call(tool='quay.io/ucsc_cgl/kallisto:0.42.4--35ac87df5b21a8e8e8d159f26864ac1e1db8cf86',
+    docker_call(tool='quay.io/ucsc_cgl/kallisto:0.43.1--355c19b1fb6fbb85f7f8293e95fb8a1e9d0da163',
                 work_dir=work_dir, parameters=parameters)
     # Tar output files together and store in fileStore
-    output_files = [os.path.join(work_dir, x) for x in ['run_info.json', 'abundance.tsv', 'abundance.h5']]
+    output_files = [os.path.join(work_dir, x) for x in ['run_info.json', 'abundance.tsv', 'abundance.h5', 'fusion.txt']]
     tarball_files(tar_name='kallisto.tar.gz', file_paths=output_files, output_dir=work_dir)
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'kallisto.tar.gz'))
 
