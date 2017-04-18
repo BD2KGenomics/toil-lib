@@ -15,12 +15,14 @@ def tarball_files(tar_name, file_paths, output_dir='.', prefix=''):
     :param str output_dir: Output destination for tarball
     :param str prefix: Optional prefix for files in tarball
     """
-    with tarfile.open(os.path.join(output_dir, tar_name), 'w:gz') as f_out:
+    output_tar = os.path.join(output_dir, tar_name)
+    with tarfile.open(output_tar, 'w:gz') as f_out:
         for file_path in file_paths:
             if not file_path.startswith('/'):
                 raise ValueError('Path provided is relative not absolute.')
             arcname = prefix + os.path.basename(file_path)
             f_out.add(file_path, arcname=arcname)
+    return output_tar
 
 
 def __forall_files(file_paths, output_dir, op):
