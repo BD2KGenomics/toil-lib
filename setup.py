@@ -50,8 +50,7 @@ def check_provided(distribution, min_version, max_version=None, optional=False):
         return str(installed_version)
 
 
-# 3.5.0 is the Toil version which contains support for Docker call
-toil_version = check_provided('toil', min_version='3.5.0', max_version='3.6.0')
+toil_version = check_provided('toil', min_version='3.7.0a1.dev392', max_version='3.7.0a1.dev392')
 
 kwargs = dict(
     name='toil-lib',
