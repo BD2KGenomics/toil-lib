@@ -191,3 +191,93 @@ def call_adam(job, master_ip, arguments,
                    default_params +
                    arguments)
 
+
+def call_avocado(job, master_ip, arguments,
+                 container="quay.io/ucsc_cgl/avocado:fb20657172d2ce38e5dcd5542b0915db4de7eaa0--036b9354dbd46e62c4d326b4308c4786fc966d6a",
+                 memory=None,
+                 override_parameters=None,
+                 run_local=False):
+    """
+    Invokes the Avocado container. Find Avocado at https://github.com/bigdatagenomics/avocado.
+
+    :param toil.Job.job job: The Toil Job calling this function
+    :param masterIP: The Spark leader IP address.
+    :param arguments: Arguments to pass to Avocado.
+    :param container: The container name to run.
+    :param memory: Gigabytes of memory to provision for Spark driver/worker.
+    :param override_parameters: Parameters passed by the user, that override our defaults.
+    :param run_local: If true, runs Spark with the --master local[*] setting, which uses
+      all cores on the local machine. The master_ip will be disregarded.
+
+    :type masterIP: MasterAddress
+    :type arguments: list of string
+    :type container: string
+    :type memory: int or None
+    :type override_parameters: list of string or None
+    :type run_local: boolean
+    """
+    if run_local:
+        master = ["--master", "local[*]"]
+    else:
+        master = ["--master",
+                  ("spark://%s:%s" % (master_ip, SPARK_MASTER_PORT)),
+                  "--conf", ("spark.hadoop.fs.default.name=hdfs://%s:%s" % (master_ip, HDFS_MASTER_PORT)),]
+
+    default_params = (master + [
+            # set max result size to unlimited, see #177
+            "--conf", "spark.driver.maxResultSize=0",
+            "--conf", "spark.kryoserializer.buffer.max=2047m"
+            ])
+
+    docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    dockerCall(job=job,
+               tool=container,
+               dockerParameters=docker_parameters,
+               parameters=_make_parameters(master_ip,
+                                           default_params,
+                                           memory,
+                                           arguments,
+                                           override_parameters))
+
+
+def call_cannoli(job, master_ip, arguments,
+                 container="quay.io/ucsc_cgl/cannoli:0a9321a382fdfad1411cb308a0de1566bf4c8bb4--036b9354dbd46e62c4d326b4308c4786fc966d6a",
+                 memory=None,
+                 override_parameters=None,
+                 run_local=False):
+    """
+    Invokes the Cannoli container. Find Cannoli at https://github.com/bigdatagenomics/cannoli.
+
+    :param toil.Job.job job: The Toil Job calling this function
+    :param masterIP: The Spark leader IP address.
+    :param arguments: Arguments to pass to Cannoli.
+    :param container: The container name to run.
+    :param memory: Gigabytes of memory to provision for Spark driver/worker.
+    :param override_parameters: Parameters passed by the user, that override our defaults.
+    :param run_local: If true, runs Spark with the --master local[*] setting, which uses
+      all cores on the local machine. The master_ip will be disregarded.
+
+    :type masterIP: MasterAddress
+    :type arguments: list of string
+    :type container: string
+    :type memory: int or None
+    :type override_parameters: list of string or None
+    :type run_local: boolean
+    """
+    if run_local:
+        master = ["--master", "local[*]"]
+    else:
+        master = ["--master",
+                  ("spark://%s:%s" % (master_ip, SPARK_MASTER_PORT)),
+                  "--conf", ("spark.hadoop.fs.default.name=hdfs://%s:%s" % (master_ip, HDFS_MASTER_PORT)),]
+
+    docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    dockerCall(job=job,
+               tool=container,
+               dockerParameters=docker_parameters,
+               parameters=_make_parameters(master_ip,
+                                           master,
+                                           memory,
+                                           arguments,
+                                           override_parameters))
+
