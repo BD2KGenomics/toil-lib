@@ -1,9 +1,9 @@
 import os
-
 import subprocess
 
+from toil.lib.docker import dockerCall
+
 from toil_lib.files import tarball_files
-from toil_lib.programs import docker_call
 from toil_lib.urls import download_url
 
 
@@ -19,7 +19,7 @@ def run_kallisto(job, r1_id, r2_id, kallisto_index_url):
     :rtype: str
     """
     work_dir = job.fileStore.getLocalTempDir()
-    download_url(url=kallisto_index_url, name='kallisto_hg38.idx', work_dir=work_dir)
+    download_url(job, url=kallisto_index_url, name='kallisto_hg38.idx', work_dir=work_dir)
     # Retrieve files
     parameters = ['quant',
                   '-i', '/data/kallisto_hg38.idx',
@@ -36,8 +36,9 @@ def run_kallisto(job, r1_id, r2_id, kallisto_index_url):
         parameters.extend(['--single', '-l', '200', '-s', '15', '/data/R1.fastq'])
 
     # Call: Kallisto
-    docker_call(job=job, tool='quay.io/ucsc_cgl/kallisto:0.43.1--355c19b1fb6fbb85f7f8293e95fb8a1e9d0da163',
-                work_dir=work_dir, parameters=parameters)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/kallisto:0.42.4--35ac87df5b21a8e8e8d159f26864ac1e1db8cf86',
+               workDir=work_dir, parameters=parameters)
+
     # Tar output files together and store in fileStore
     output_files = [os.path.join(work_dir, x) for x in ['run_info.json', 'abundance.tsv', 'abundance.h5', 'fusion.txt']]
     tarball_files(tar_name='kallisto.tar.gz', file_paths=output_files, output_dir=work_dir)
@@ -56,7 +57,7 @@ def run_rsem(job, bam_id, rsem_ref_url, paired=True):
     :rtype: str
     """
     work_dir = job.fileStore.getLocalTempDir()
-    download_url(url=rsem_ref_url, name='rsem_ref.tar.gz', work_dir=work_dir)
+    download_url(job, url=rsem_ref_url, name='rsem_ref.tar.gz', work_dir=work_dir)
     subprocess.check_call(['tar', '-xvf', os.path.join(work_dir, 'rsem_ref.tar.gz'), '-C', work_dir])
     os.remove(os.path.join(work_dir, 'rsem_ref.tar.gz'))
     # Determine tarball structure - based on it, ascertain folder name and rsem reference prefix
@@ -81,8 +82,8 @@ def run_rsem(job, bam_id, rsem_ref_url, paired=True):
                   output_prefix]
     if paired:
         parameters = ['--paired-end'] + parameters
-    docker_call(job=job, tool='quay.io/ucsc_cgl/rsem:1.2.25--d4275175cc8df36967db460b06337a14f40d2f21',
-                parameters=parameters, work_dir=work_dir)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/rsem:1.2.25--d4275175cc8df36967db460b06337a14f40d2f21',
+               parameters=parameters, workDir=work_dir)
     # Write to FileStore
     gene_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, output_prefix + '.genes.results'))
     isoform_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, output_prefix + '.isoforms.results'))
@@ -107,8 +108,8 @@ def run_rsem_postprocess(job, rsem_gene_id, rsem_isoform_id):
     iso = job.fileStore.readGlobalFile(rsem_isoform_id, os.path.join(work_dir, 'rsem_isoforms.results'))
     # Perform HUGO gene / isoform name mapping
     command = ['-g', 'rsem_genes.results', '-i', 'rsem_isoforms.results']
-    docker_call(job=job, tool='quay.io/ucsc_cgl/gencode_hugo_mapping:1.0--cb4865d02f9199462e66410f515c4dabbd061e4d',
-                parameters=command, work_dir=work_dir)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/gencode_hugo_mapping:1.0--cb4865d02f9199462e66410f515c4dabbd061e4d',
+               parameters=command, workDir=work_dir)
     hugo_files = [os.path.join(work_dir, x) for x in ['rsem_genes.hugo.results', 'rsem_isoforms.hugo.results']]
     # Create tarballs for outputs
     tarball_files('rsem.tar.gz', file_paths=[os.path.join(work_dir, x) for x in [genes, iso]], output_dir=work_dir)
