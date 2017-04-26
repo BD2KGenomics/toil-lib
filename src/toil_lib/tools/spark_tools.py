@@ -95,7 +95,12 @@ def _make_parameters(master_ip, default_parameters, memory, arguments, override_
     return parameters        
     
 
-def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=None):
+def call_conductor(job,
+                   master_ip,
+                   src,
+                   dst,
+                   container="quay.io/ucsc_cgl/conductor",
+                   memory=None, override_parameters=None):
     """
     Invokes the Conductor container to copy files between S3 and HDFS and vice versa.
     Find Conductor at https://github.com/BD2KGenomics/conductor.
@@ -103,13 +108,15 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
     :param toil.Job.job job: The Toil Job calling this function
     :param masterIP: The Spark leader IP address.
     :param src: URL of file to copy.
-    :param src: URL of location to copy file to.
+    :param dst: URL of location to copy file to.
+    :param container: The container name to run.
     :param memory: Gigabytes of memory to provision for Spark driver/worker.
     :param override_parameters: Parameters passed by the user, that override our defaults.
 
     :type masterIP: MasterAddress
     :type src: string
     :type dst: string
+    :type container: string
     :type memory: int or None
     :type override_parameters: list of string or None
     """
@@ -118,7 +125,7 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
 
     docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
     dockerCall(job=job,
-                tool="quay.io/ucsc_cgl/conductor",
+                tool=container,
                 parameters=_make_parameters(master_ip,
                                             [], # no conductor specific spark configuration
                                             memory,
@@ -128,6 +135,7 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
 
 
 def call_adam(job, master_ip, arguments,
+              container="quay.io/ucsc_cgl/adam:0.22.0--7add8b306862902b2bdd28a991e4e8dbc5292504",
               memory=None,
               override_parameters=None,
               run_local=False,
@@ -138,6 +146,7 @@ def call_adam(job, master_ip, arguments,
     :param toil.Job.job job: The Toil Job calling this function
     :param masterIP: The Spark leader IP address.
     :param arguments: Arguments to pass to ADAM.
+    :param container: The container name to run.
     :param memory: Gigabytes of memory to provision for Spark driver/worker.
     :param override_parameters: Parameters passed by the user, that override our defaults.
     :param native_adam_path: Path to ADAM executable. If not provided, Docker is used.
@@ -146,6 +155,7 @@ def call_adam(job, master_ip, arguments,
 
     :type masterIP: MasterAddress
     :type arguments: list of string
+    :type container: string
     :type memory: int or None
     :type override_parameters: list of string or None
     :type native_adam_path: string or None
@@ -179,7 +189,7 @@ def call_adam(job, master_ip, arguments,
     if native_adam_path is None:
         docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
         dockerCall(job=job,
-                    tool="quay.io/ucsc_cgl/adam:962-ehf--6e7085f8cac4b9a927dc9fb06b48007957256b80",
+                    tool=container,
                     dockerParameters=docker_parameters,
                     parameters=_make_parameters(master_ip,
                                                 default_params,
