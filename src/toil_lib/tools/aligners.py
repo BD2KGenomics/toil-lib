@@ -1,12 +1,12 @@
 import os
-
 import subprocess
 
-from toil_lib.programs import docker_call
+from toil.lib.docker import dockerCall
+
 from toil_lib.urls import download_url
 
 
-def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
+def run_star(job, r1_id, r2_id, star_index_url, wiggle=False, sort=True):
     """
     Performs alignment of fastqs to bam via STAR
 
@@ -31,7 +31,6 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
     parameters = ['--runThreadN', str(job.cores),
                   '--genomeDir', star_index,
                   '--outFileNamePrefix', 'rna',
-                  '--outSAMtype', 'BAM', 'SortedByCoordinate',
                   '--outSAMunmapped', 'Within',
                   '--quantMode', 'TranscriptomeSAM',
                   '--outSAMattributes', 'NH', 'HI', 'AS', 'NM', 'MD',
@@ -46,6 +45,13 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
                   '--alignSJDBoverhangMin', '1',
                   '--sjdbScore', '1',
                   '--limitBAMsortRAM', '49268954168']
+    # Modify paramaters based on function arguments
+    if sort:
+        parameters.extend(['--outSAMtype', 'BAM', 'SortedByCoordinate'])
+        aligned_bam = 'rnaAligned.sortedByCoord.out.bam'
+    else:
+        parameters.extend(['--outSAMtype', 'BAM', 'Unsorted'])
+        aligned_bam = 'rnaAligned.out.bam'
     if wiggle:
         parameters.extend(['--outWigType', 'bedGraph',
                            '--outWigStrand', 'Unstranded',
@@ -58,24 +64,25 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False):
         job.fileStore.readGlobalFile(r1_id, os.path.join(work_dir, 'R1.fastq'))
         parameters.extend(['--readFilesIn', '/data/R1.fastq'])
     # Call: STAR Mapping
-    docker_call(tool='quay.io/ucsc_cgl/star:2.4.2a--bcbd5122b69ff6ac4ef61958e47bde94001cfe80',
-                work_dir=work_dir, parameters=parameters)
-    # Check output bam isnt size zero
-    sorted_bam_path = os.path.join(work_dir, 'rnaAligned.sortedByCoord.out.bam')
-    assert(os.stat(sorted_bam_path).st_size > 0, 'Genome-aligned bam failed to sort. Ensure sufficient memory is free.')
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/star:2.4.2a--bcbd5122b69ff6ac4ef61958e47bde94001cfe80',
+               workDir=work_dir, parameters=parameters)
+    # Check output bam isnt size zero if sorted
+    aligned_bam_path = os.path.join(work_dir, aligned_bam)
+    if sort:
+        assert(os.stat(aligned_bam_path).st_size > 0, 'Aligned bam failed to sort. Ensure sufficient memory is free.')
     # Write to fileStore
-    sorted_id = job.fileStore.writeGlobalFile(sorted_bam_path)
+    aligned_id = job.fileStore.writeGlobalFile(aligned_bam_path)
     transcriptome_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rnaAligned.toTranscriptome.out.bam'))
     log_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rnaLog.final.out'))
     sj_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rnaSJ.out.tab'))
     if wiggle:
         wiggle_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'rnaSignal.UniqueMultiple.str1.out.bg'))
-        return transcriptome_id, sorted_id, wiggle_id, log_id, sj_id
+        return transcriptome_id, aligned_id, wiggle_id, log_id, sj_id
     else:
-        return transcriptome_id, sorted_id, log_id, sj_id
+        return transcriptome_id, aligned_id, log_id, sj_id
 
 
-def run_bwakit(job, config, sort=True, trim=False):
+def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     """
     Runs BWA-Kit to align single or paired-end fastq files or realign SAM/BAM files.
 
@@ -110,10 +117,12 @@ def run_bwakit(job, config, sort=True, trim=False):
 
     :param bool sort: If True, sorts the BAM
     :param bool trim: If True, performs adapter trimming
+    :param bool mark_secondary: If True, mark shorter split reads as secondary
     :return: FileStoreID of BAM
     :rtype: str
     """
     work_dir = job.fileStore.getLocalTempDir()
+    rg = None
     inputs = {'ref.fa': config.ref,
               'ref.fa.fai': config.fai,
               'ref.fa.amb': config.amb,
@@ -162,17 +171,17 @@ def run_bwakit(job, config, sort=True, trim=False):
         opt_args.append('-s')
     if trim:
         opt_args.append('-a')
+    if mark_secondary:
+        opt_args.append('-M')
     # Call: bwakit
     parameters = ['-t', str(job.cores)] + opt_args + ['-o', '/data/aligned', '/data/ref.fa']
     if rg is not None:
         parameters = ['-R', rg] + parameters
     for sample in samples:
         parameters.append('/data/{}'.format(sample))
-    mock_bam = config.uuid + '.bam'
-    outputs = {'aligned.aln.bam': mock_bam}
 
-    docker_call(tool='quay.io/ucsc_cgl/bwakit:0.7.12--528bb9bf73099a31e74a7f5e6e3f2e0a41da486e',
-                parameters=parameters, inputs=inputs.keys(), outputs=outputs, work_dir=work_dir)
+    dockerCall(job=job, tool='quay.io/ucsc_cgl/bwakit:0.7.12--c85ccff267d5021b75bb1c9ccf5f4b79f91835cc',
+               parameters=parameters, workDir=work_dir)
 
     # Either write file to local output directory or upload to S3 cloud storage
     job.fileStore.logToMaster('Aligned sample: {}'.format(config.uuid))
