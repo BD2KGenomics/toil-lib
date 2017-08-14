@@ -2,6 +2,17 @@ import os
 import subprocess
 
 
+def log_runtime(job, start, end, cmd):
+
+    elapsed_time = end - start
+    
+    hours = int(elapsed_time) / (60 * 60)
+    minutes = int(elapsed_time - (60 * 60 * hours)) / 60
+    seconds = int(elapsed_time - (60 * 60 * hours) - (60 * minutes)) % 60
+
+    job.fileStore.logToMaster("%s ran in %dh%dm%ds" % (cmd, hours, minutes, seconds))
+
+
 def get_mean_insert_size(work_dir, bam_name):
     """Function taken from MC3 Pipeline"""
     cmd = "docker run --log-driver=none --rm -v {}:/data quay.io/ucsc_cgl/samtools " \

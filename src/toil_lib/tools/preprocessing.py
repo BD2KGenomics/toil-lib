@@ -5,7 +5,7 @@ from toil.job import PromisedRequirement
 from toil.lib.docker import dockerCall
 
 from toil_lib import require
-
+from toil_lib.tools import log_runtime
 
 def run_cutadapt(job, r1_id, r2_id, fwd_3pr_adapter, rev_3pr_adapter):
     """
@@ -108,17 +108,6 @@ def run_samtools_view(job, bam):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
 
 
-def _log_runtime(job, start, end, cmd):
-
-    elapsed_time = end - start
-    
-    hours = int(elapsed_time) / (60 * 60)
-    minutes = int(elapsed_time - (60 * 60 * hours)) / 60
-    seconds = int(elapsed_time - (60 * 60 * hours) - (60 * minutes)) % 60
-
-    job.fileStore.logToMaster("%s ran in %dh%dm%ds" % (cmd, hours, minutes, seconds))
-
-
 def run_samtools_sort(job, bam):
     """
     Sorts BAM file using SAMtools sort
@@ -140,7 +129,7 @@ def run_samtools_sort(job, bam):
                parameters=command,
                tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c')
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "samtools sort")
+    log_runtime(job, start_time, end_time, "samtools sort")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
 
@@ -164,7 +153,7 @@ def run_samtools_rmdup(job, bam):
                parameters=command,
                tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c')
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "samtools rmdup")
+    log_runtime(job, start_time, end_time, "samtools rmdup")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
 
@@ -195,7 +184,7 @@ def run_sambamba_sort(job, bam, sort_by_name=False):
                parameters=command,
                tool='quay.io/biocontainers/sambamba:0.6.6--0')
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "sambamba sort")
+    log_runtime(job, start_time, end_time, "sambamba sort")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
 
@@ -221,7 +210,7 @@ def run_sambamba_markdup(job, bam):
                parameters=command,
                tool='quay.io/biocontainers/sambamba:0.6.6--0')
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "sambamba mkdup")
+    log_runtime(job, start_time, end_time, "sambamba mkdup")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
 
@@ -246,7 +235,7 @@ def run_samblaster(job, sam):
                parameters=command,
                tool='quay.io/biocontainers/samblaster:0.1.24--0')
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "SAMBLASTER")
+    log_runtime(job, start_time, end_time, "SAMBLASTER")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.sam'))
 
 
@@ -308,7 +297,7 @@ def picard_mark_duplicates(job, bam, bai, validation_stringency='LENIENT'):
                tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "Picard MarkDuplicates")
+    log_runtime(job, start_time, end_time, "Picard MarkDuplicates")
 
     bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'mkdups.bam'))
     bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'mkdups.bai'))
@@ -349,7 +338,7 @@ def run_picard_sort(job, bam, sort_by_name=False):
                tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "Picard SortSam")
+    log_runtime(job, start_time, end_time, "Picard SortSam")
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
 
@@ -533,7 +522,7 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, 
                   '-o', '/data/sample.intervals']
 
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 RealignerTargetCreator")
+    log_runtime(job, start_time, end_time, "GATK3 RealignerTargetCreator")
 
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
@@ -550,7 +539,7 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, 
                parameters=parameters,
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 RTC")
+    log_runtime(job, start_time, end_time, "GATK3 RTC")
 
     # Write to fileStore
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
@@ -614,7 +603,7 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mil
                parameters=parameters,
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 IndelRealigner")
+    log_runtime(job, start_time, end_time, "GATK3 IndelRealigner")
 
     indel_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
     indel_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bai'))
@@ -674,7 +663,7 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
                parameters=parameters,
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 BaseRecalibrator")
+    log_runtime(job, start_time, end_time, "GATK3 BaseRecalibrator")
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'recal_data.table'))
 
@@ -713,7 +702,7 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
                   '-BQSR', '/data/recal.table',
                   '-o', '/data/bqsr.bam']
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 BQSR PrintReads")
+    log_runtime(job, start_time, end_time, "GATK3 BQSR PrintReads")
     
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
@@ -729,7 +718,7 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
                parameters=parameters,
                dockerParameters=docker_parameters)
     end_time = time.time()
-    _log_runtime(job, start_time, end_time, "GATK3 BQSR PrintReads")
+    log_runtime(job, start_time, end_time, "GATK3 BQSR PrintReads")
 
     output_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'bqsr.bam'))
     output_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'bqsr.bai'))
