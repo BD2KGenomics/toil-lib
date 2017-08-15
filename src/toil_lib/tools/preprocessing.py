@@ -66,12 +66,14 @@ def run_samtools_faidx(job, ref_id):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.fasta.fai'))
 
 
-def run_samtools_index(job, bam):
+def run_samtools_index(job, bam, benchmarking=False):
     """
     Runs SAMtools index to create a BAM index file
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID of the BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for BAM index file
     :rtype: str
     """
@@ -79,19 +81,28 @@ def run_samtools_index(job, bam):
     job.fileStore.readGlobalFile(bam, os.path.join(work_dir, 'sample.bam'))
     # Call: index the bam
     parameters = ['index', '/data/sample.bam']
+    start_time = time.time()
     dockerCall(job=job, workDir=work_dir, parameters=parameters,
                tool='quay.io/ucsc_cgl/samtools:0.1.19--dd5ac549b95eb3e5d166a5e310417ef13651994e')
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'samtools index')
+
     # Write to fileStore
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
+    bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
+    if benchmarking:
+        return (bai, (end_time - start_time))
+    else:
+        return bai
 
 
-
-def run_samtools_view(job, bam):
+def run_samtools_view(job, bam, benchmarking=False):
     """
     Runs SAMtools view to create a SAM file.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID of the BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for SAM file
     :rtype: str
     """
@@ -102,18 +113,28 @@ def run_samtools_view(job, bam):
                   '-h',
                   '-o', '/data/sample.sam',
                   '/data/sample.bam']
+    start_time = time.time()
     dockerCall(job=job, workDir=work_dir, parameters=parameters,
                tool='quay.io/ucsc_cgl/samtools:0.1.19--dd5ac549b95eb3e5d166a5e310417ef13651994e')
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'samtools view')
+
     # Write to fileStore
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
+    sam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
+    if benchmarking:
+        return (sam_id, (end_time - start_time))
+    else:
+        return sam_id
 
 
-def run_samtools_sort(job, bam):
+def run_samtools_sort(job, bam, benchmarking=False):
     """
     Sorts BAM file using SAMtools sort
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for sorted BAM file
     :rtype: str
     """
@@ -130,15 +151,22 @@ def run_samtools_sort(job, bam):
                tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c')
     end_time = time.time()
     log_runtime(job, start_time, end_time, "samtools sort")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
 
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
+    
 
-def run_samtools_rmdup(job, bam):
+def run_samtools_rmdup(job, bam, benchmarking=False):
     """
     Mark reads as PCR duplicates using SAMtools rmdup
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for sorted BAM file
     :rtype: str
     """
@@ -154,15 +182,24 @@ def run_samtools_rmdup(job, bam):
                tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c')
     end_time = time.time()
     log_runtime(job, start_time, end_time, "samtools rmdup")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
 
 
-def run_sambamba_index(job, bam, sort_by_name=False):
+def run_sambamba_index(job, bam,
+                       sort_by_name=False,
+                       benchmarking=False):
     """
     Indexes a BAM file using Sambamba.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for sorted BAM file
     :rtype: str
     """
@@ -179,15 +216,24 @@ def run_sambamba_index(job, bam, sort_by_name=False):
                tool='quay.io/biocontainers/sambamba:0.6.6--0')
     end_time = time.time()
     _log_runtime(job, start_time, end_time, "sambamba index")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'input.bam.bai'))
+    
+    bai_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'input.bam.bai'))
+    if benchmarking:
+        return (bai_id, (end_time - start_time))
+    else:
+        bai_id
 
 
-def run_sambamba_sort(job, bam, sort_by_name=False):
+def run_sambamba_sort(job, bam,
+                      sort_by_name=False,
+                      benchmarking=False):
     """
     Sorts BAM file using Sambamba sort
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :param boolean sort_by_name: If true, sorts by read name instead of coordinate.
     :return: FileStoreID for sorted BAM file
     :rtype: str
@@ -210,15 +256,22 @@ def run_sambamba_sort(job, bam, sort_by_name=False):
                tool='quay.io/biocontainers/sambamba:0.6.6--0')
     end_time = time.time()
     log_runtime(job, start_time, end_time, "sambamba sort")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
 
 
-def run_sambamba_markdup(job, bam):
+def run_sambamba_markdup(job, bam, benchmarking=True):
     """
     Marks reads as PCR duplicates using Sambamba
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for sorted BAM file
     :rtype: str
     """
@@ -236,15 +289,22 @@ def run_sambamba_markdup(job, bam):
                tool='quay.io/biocontainers/sambamba:0.6.6--0')
     end_time = time.time()
     log_runtime(job, start_time, end_time, "sambamba mkdup")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
 
 
-def run_samblaster(job, sam):
+def run_samblaster(job, sam, benchmarking=False):
     """
     Marks reads as PCR duplicates using SAMBLASTER
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str sam: FileStoreID for SAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for deduped SAM file
     :rtype: str
     """
@@ -261,7 +321,12 @@ def run_samblaster(job, sam):
                tool='quay.io/biocontainers/samblaster:0.1.24--0')
     end_time = time.time()
     log_runtime(job, start_time, end_time, "SAMBLASTER")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.sam'))
+
+    sam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.sam'))
+    if benchmarking:
+        return (sam_id, (end_time - start_time))
+    else:
+        return sam_id
 
 
 def run_picard_create_sequence_dictionary(job, ref_id):
@@ -283,13 +348,17 @@ def run_picard_create_sequence_dictionary(job, ref_id):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
 
-def picard_mark_duplicates(job, bam, bai, validation_stringency='LENIENT'):
+def picard_mark_duplicates(job, bam, bai,
+                           validation_stringency='LENIENT',
+                           benchmarking=False):
     """
     Runs Picard MarkDuplicates on a BAM file. Requires that the BAM file be coordinate sorted.
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
     :param str bai: FileStoreID for BAM index file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :param str validation_stringency: BAM file validation stringency, default is LENIENT
     :return: FileStoreIDs for BAM and BAI files
     :rtype: tuple
@@ -326,15 +395,23 @@ def picard_mark_duplicates(job, bam, bai, validation_stringency='LENIENT'):
 
     bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'mkdups.bam'))
     bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'mkdups.bai'))
-    return bam, bai
+
+    if benchmarking:
+        return (bam, bai, (end_time - start_time))
+    else:
+        return (bam, bai)
 
 
-def run_picard_sort(job, bam, sort_by_name=False):
+def run_picard_sort(job, bam,
+                    sort_by_name=False,
+                    benchmarking=False):
     """
     Sorts BAM file using Picard SortSam
 
     :param JobFunctionWrappingJob job: passed automatically by Toil
     :param str bam: FileStoreID for BAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :param boolean sort_by_name: If true, sorts by read name instead of coordinate.
     :return: FileStoreID for sorted BAM file
     :rtype: str
@@ -364,7 +441,12 @@ def run_picard_sort(job, bam, sort_by_name=False):
                dockerParameters=docker_parameters)
     end_time = time.time()
     log_runtime(job, start_time, end_time, "Picard SortSam")
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
 
 
 def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp, realign=False, unsafe=False):
@@ -507,7 +589,9 @@ def run_gatk_preprocessing(job, bam, bai, ref, ref_dict, fai, g1k, mills, dbsnp,
     return recalibrate_reads.rv(0), recalibrate_reads.rv(1)
 
 
-def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, unsafe=False):
+def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills,
+                                 unsafe=False,
+                                 benchmarking=False):
     """
     Creates intervals file needed for INDEL realignment
 
@@ -519,6 +603,8 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, 
     :param str fai: FileStoreID for reference fasta index file
     :param str g1k: FileStoreID for 1000 Genomes VCF file
     :param str mills: FileStoreID for Mills VCF file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
     :return: FileStoreID for realignment intervals file
     :rtype: str
@@ -567,10 +653,16 @@ def run_realigner_target_creator(job, bam, bai, ref, ref_dict, fai, g1k, mills, 
     log_runtime(job, start_time, end_time, "GATK3 RTC")
 
     # Write to fileStore
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
+    targets_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
+    if benchmarking:
+        return (targets_id, (end_time - start_time))
+    else:
+        return targets_id
 
 
-def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mills, unsafe=False):
+def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mills,
+                          unsafe=False,
+                          benchmarking=False):
     """
     Realigns BAM file at realignment target intervals
 
@@ -584,6 +676,8 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mil
     :param str g1k: FileStoreID for 1000 Genomes VCF file
     :param str mills: FileStoreID for Mills VCF file
     :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreIDs for realigned BAM and BAI files
     :rtype: tuple(str, str)
     """
@@ -632,10 +726,16 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, g1k, mil
 
     indel_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bam'))
     indel_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.bai'))
-    return indel_bam, indel_bai
+
+    if benchmarking:
+        return (indel_bam, indel_bai, (end_time - start_time))
+    else:
+        return (indel_bam, indel_bai)
 
 
-def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsafe=False):
+def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, 
+                           unsafe=False,
+                           benchmarking=False):
     """
     Creates recalibration table for Base Quality Score Recalibration
 
@@ -648,6 +748,8 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
     :param str dbsnp: FileStoreID for dbSNP VCF file
     :param str mills: FileStoreID for Mills VCF file
     :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID for the recalibration table file
     :rtype: str
     """
@@ -690,7 +792,11 @@ def run_base_recalibration(job, bam, bai, ref, ref_dict, fai, dbsnp, mills, unsa
     end_time = time.time()
     log_runtime(job, start_time, end_time, "GATK3 BaseRecalibrator")
 
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'recal_data.table'))
+    table_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'recal_data.table'))
+    if benchmarking:
+        return (table_id, (end_time - start_time))
+    else:
+        return table_id
 
 
 def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=False):
@@ -705,6 +811,8 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
     :param str ref_dict: FileStoreID for reference genome sequence dictionary file
     :param str fai: FileStoreID for reference genome fasta index file
     :param bool unsafe: If True, runs GATK in UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreIDs for recalibrated BAM and BAI files
     :rtype: tuple(str, str)
     """
@@ -747,4 +855,8 @@ def apply_bqsr_recalibration(job, table, bam, bai, ref, ref_dict, fai, unsafe=Fa
 
     output_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'bqsr.bam'))
     output_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'bqsr.bai'))
-    return output_bam, output_bai
+
+    if benchmarking:
+        return (output_bam, output_bai, (end_time - start_time))
+    else:
+        return (output_bam, output_bai)

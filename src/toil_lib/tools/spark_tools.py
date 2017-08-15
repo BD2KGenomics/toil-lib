@@ -8,10 +8,12 @@ ADAM/Spark pipeline
 
 import os.path
 from subprocess import check_call
+import time
 
 from toil.lib.docker import dockerCall
 
 from toil_lib import require
+from toil_lib.tools import log_runtime
 
 SPARK_MASTER_PORT = "7077"
 HDFS_MASTER_PORT = "8020"

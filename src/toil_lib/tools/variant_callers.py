@@ -22,6 +22,8 @@ def run_freebayes(job, ref, ref_fai, bam, bai, chunksize=None):
     :param str bai: The FileStoreID of the BAM index.
     :param int chunksize: The size of chunks to split into and call in parallel.
       Defaults to None.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, ref_fai, bam, bai]
@@ -93,6 +95,8 @@ def run_platypus(job, ref, ref_fai, bam, bai, assemble=False):
     :param str bam: The FileStoreID of the BAM to call.
     :param str bai: The FileStoreID of the BAM index.
     :param boolean assemble: If true, runs Platypus in assembler mode.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, ref_fai, bam, bai]
@@ -119,10 +123,14 @@ def run_platypus(job, ref, ref_fai, bam, bai, assemble=False):
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'Platypus, assemble={}'.format(assemble))
     
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.vcf'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.vcf'))
+    if benchmarking:
+        return (vcf_id, (end_time - start_time))
+    else:
+        return vcf_id
 
 
-def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
+def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name, benchmarking=False):
     '''
     Generates the snapshot file and calls variants using 16GT.
 
@@ -132,6 +140,8 @@ def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
     :param str bam: The FileStoreID of the BAM to call.
     :param str dbsnp: The FileStoreID of the dbSNP VCF for filtration.
     :param str sample_name: The name of the sample being called.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, genome_index, bam, dbsnp]
@@ -149,6 +159,7 @@ def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
                tool='quay.io/ucsc_cgl/16gt')
     end_time = time.time()
     log_runtime(job, start_time, end_time, '16gt bam2snapshot')
+    snapshot_time = (end_time - start_time)
 
     start_time = time.time()
     dockerCall(job=job,
@@ -159,6 +170,7 @@ def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
                tool='quay.io/ucsc_cgl/16gt')
     end_time = time.time()
     log_runtime(job, start_time, end_time, '16gt snapshotSnpcaller')
+    snp_caller_time = (end_time - start_time)
 
     start_time = time.time()
     dockerCall(job=job,
@@ -171,6 +183,7 @@ def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
                outfile=open(os.path.join(work_dir, 'sample.vcf')))
     end_time = time.time()
     log_runtime(job, start_time, end_time, '16gt txt2vcf')
+    text_vcf_time = (end_time - start_time)
 
     start_time = time.time()
     dockerCall(job=job,
@@ -182,11 +195,18 @@ def run_16gt(job, ref, genome_index, bam, dbsnp, sample_name):
                outfile=open(os.path.join(work_dir, 'sample.filtered.vcf')))
     end_time = time.time()
     log_runtime(job, start_time, end_time, '16gt filterVCF')
+    filter_vcf_time = (end_time - start_time)
 
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.filtered.vcf'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.filtered.vcf'))
+    if benchmarking:
+        return (vcf_id, snapshot_time, snp_caller_time, text_vcf_time, filter_vcf_time)
+    else:
+        return vcf_id
     
         
-def run_strelka(job, ref, ref_fai, bam, bai, candidate_indels=None):
+def run_strelka(job, ref, ref_fai, bam, bai,
+                candidate_indels=None,
+                benchmarking=False):
     '''
     Runs Strelka's germline single sample caller.
 
@@ -197,6 +217,8 @@ def run_strelka(job, ref, ref_fai, bam, bai, candidate_indels=None):
     :param str bai: The FileStoreID of the BAM index.
     :param str candidate_indels: The optional FileStoreID of the candidate
        indel GZIPed VCF.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     generate_parameters = ['/opt/strelka/bin/configureStrelkaGermlineWorkflow.py',
                            '--bam', '/data/sample.bam',
@@ -235,10 +257,14 @@ def run_strelka(job, ref, ref_fai, bam, bai, candidate_indels=None):
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'Strelka')
 
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'variants.vcf.gz'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'variants.vcf.gz'))
+    if benchmarking:
+        return (vcf_id, (end_time - start_time))
+    else:
+        return vcf_id
 
 
-def run_manta(job, ref, ref_fai, bam, bai, candidate_indels=None):
+def run_manta(job, ref, ref_fai, bam, bai, benchmarking=False):
     '''
     Runs Manta's germline single sample caller.
 
@@ -247,8 +273,8 @@ def run_manta(job, ref, ref_fai, bam, bai, candidate_indels=None):
     :param str ref_fai: The reference FASTA index FileStoreID.
     :param str bam: The FileStoreID of the BAM to call.
     :param str bai: The FileStoreID of the BAM index.
-    :param str candidate_indels: The optional FileStoreID of the candidate
-       indel GZIPed VCF.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, ref_fai, bam, bai]
@@ -277,11 +303,16 @@ def run_manta(job, ref, ref_fai, bam, bai, candidate_indels=None):
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'Manta')
 
-    return (job.fileStore.writeGlobalFile(os.path.join(work_dir, 'diploidSV.vcf.gz')),
-            job.fileStore.writeGlobalFile(os.path.join(work_dir, 'candidateSmallIndels.vcf.gz')))
+    sv_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'diploidSV.vcf.gz'))
+    indel_id = job.fileStore.writeGlobalFile(os.path.join(work_dir,
+                                                          'candidateSmallIndels.vcf.gz'))
+    if benchmarking:
+        return (sv_id, indel_id, (end_time - start_time))
+    else:
+        return (sv_id, indel_id)
 
 
-def run_samtools_mpileup(job, ref, ref_fai, bam, bai):
+def run_samtools_mpileup(job, ref, ref_fai, bam, bai, benchmarking=False):
     '''
     Runs the samtools mpileup variant caller.
     
@@ -290,6 +321,8 @@ def run_samtools_mpileup(job, ref, ref_fai, bam, bai):
     :param str ref_fai: The reference FASTA index FileStoreID.
     :param str bam: The FileStoreID of the BAM to call.
     :param str bai: The FileStoreID of the BAM index.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, ref_fai, bam, bai]
@@ -308,15 +341,21 @@ def run_samtools_mpileup(job, ref, ref_fai, bam, bai):
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'samtools mpileup')
     
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.vcf.gz'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.vcf.gz'))
+    if benchmarking:
+        return (vcf_id, (end_time - start_time))
+    else:
+        return vcf_id
 
 
-def run_bcftools_call(job, vcf_gz):
+def run_bcftools_call(job, vcf_gz, benchmarking=False):
     '''
     Runs the bcftools call command.
     
     :param JobFunctionWrappingJob job: passed automatically by Toil.
     :param str vcf_gz: The FileStoreID of the GZIPed VCF.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     job.fileStore.readGlobalFile(vcf_gz, os.path.join(work_dir, 'sample.vcf.gz'))
@@ -332,7 +371,11 @@ def run_bcftools_call(job, vcf_gz):
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'bcftools call')
     
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.calls.vcf.gz'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.calls.vcf.gz'))
+    if benchmarking:
+        return (vcf_id, (end_time - start_time))
+    else:
+        return vcf_id
 
 
 def run_gatk3_haplotype_caller(job, ref, ref_fai, ref_dict, bam, bai,
@@ -346,6 +389,8 @@ def run_gatk3_haplotype_caller(job, ref, ref_fai, ref_dict, bam, bai,
     :param str ref_dict: The reference sequence dictionary FileStoreID.
     :param str bam: The FileStoreID of the BAM to call.
     :param str bai: The FileStoreID of the BAM index.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''    
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, ref_fai, ref_dict, bam, bai]
@@ -378,4 +423,8 @@ def run_gatk3_haplotype_caller(job, ref, ref_fai, ref_dict, bam, bai,
     end_time = time.time()
     log_runtime(job, start_time, end_time, "GATK3 HaplotypeCaller")
 
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.g.vcf'))
+    vcf_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'output.g.vcf'))
+    if benchmarking:
+        return (vcf_id, (end_time - start_time))
+    else:
+        return vcf_id

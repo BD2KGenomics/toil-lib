@@ -1,9 +1,11 @@
 import os
 import subprocess
+import time
 
 from toil.lib.docker import dockerCall
 
 from toil_lib import require
+from toil_lib.tools import log_runtime
 from toil_lib.urls import download_url
 
 
@@ -83,7 +85,11 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False, sort=True):
         return transcriptome_id, aligned_id, log_id, sj_id
 
 
-def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
+def run_bwakit(job, config,
+               sort=True,
+               trim=False,
+               mark_secondary=False,
+               benchmarking=False):
     """
     Runs BWA-Kit to align single or paired-end fastq files or realign SAM/BAM files.
 
@@ -119,6 +125,8 @@ def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     :param bool sort: If True, sorts the BAM
     :param bool trim: If True, performs adapter trimming
     :param bool mark_secondary: If True, mark shorter split reads as secondary
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID of BAM
     :rtype: str
     """
@@ -181,18 +189,26 @@ def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     for sample in samples:
         parameters.append('/data/{}'.format(sample))
 
+    start_time = time.time()
     dockerCall(job=job, tool='quay.io/ucsc_cgl/bwakit:0.7.12--c85ccff267d5021b75bb1c9ccf5f4b79f91835cc',
                parameters=parameters, workDir=work_dir)
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'bwakit')
 
     # Either write file to local output directory or upload to S3 cloud storage
     job.fileStore.logToMaster('Aligned sample: {}'.format(config.uuid))
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'aligned.aln.bam'))
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'aligned.aln.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
 
 
 def run_bowtie2(job,
                 read1,
                 name1, name2, name3, name4, rev1, rev2, ref,
-                read2=None):
+                read2=None,
+                benchmarking=False):
     '''
     Runs bowtie2 for alignment.
 
@@ -206,6 +222,8 @@ def run_bowtie2(job,
     :param str rev2: The FileStoreID of the NAME.rev.2.bt2 index file.
     :param str ref: The reference FASTA FileStoreID.
     :param str read2: The (optional) FileStoreID of the first-of-pair file.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     file_ids = [ref, read1,
@@ -235,7 +253,11 @@ def run_bowtie2(job,
     end_time = time.time()
     log_runtime(job, start_time, end_time, 'bowtie2')
 
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
+    sam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
+    if benchmarking:
+        return (sam_id, (end_time - start_time))
+    else:
+        return sam_id
 
 
 def run_snap(job,
@@ -243,7 +265,8 @@ def run_snap(job,
              genome, genome_index, genome_hash, overflow,
              read2=None,
              sort=False,
-             mark_duplicates=False):
+             mark_duplicates=False,
+             benchmarking=False):
     '''
     Runs SNAP for alignment.
 
@@ -262,6 +285,8 @@ def run_snap(job,
       this function will also return the BAM Index.
     :param boolean mark_duplicates: If true, marks reads as duplicates. Defaults
       to false. This option is only valid if sort is True.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
     os.mkdir(os.path.join(work_dir, 'snap'))
@@ -315,8 +340,16 @@ def run_snap(job,
     log_runtime(job, start_time, end_time, 'snap (sort={}, dm={})'.format(sort,
                                                                           mark_duplicates))
 
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam'))
     if not sort:
-        return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam'))
+        if benchmarking:
+            return (bam_id, (end_time - start_time))
+        else:
+            return bam_id
     else:
-        return (job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam')),
-                job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai')))
+        bai_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
+        if benchmarking:
+            return (bam_id, bai_id, (end_time - start_time))
+        else:
+            return (bam_id, bai_id)
+                
