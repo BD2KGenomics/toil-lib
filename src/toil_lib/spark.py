@@ -27,6 +27,8 @@ _SPARK_MASTER_PORT = "7077"
 
 def spawn_spark_cluster(job,
                         numWorkers,
+                        sparkMasterContainer="quay.io/ucsc_cgl/apache-spark-master:1.5.2",
+                        sparkWorkerContainer="quay.io/ucsc_cgl/apache-spark-worker:1.5.2",
                         cores=None,
                         memory=None,
                         disk=None,
@@ -34,13 +36,17 @@ def spawn_spark_cluster(job,
     '''
     :param numWorkers: The number of worker nodes to have in the cluster. \
     Must be greater than or equal to 1.
+    :param sparkMasterContainer: The Docker image to run for the Spark master.
+    :param sparkWorkerContainer: The Docker image to run for the Spark worker.
     :param cores: Optional parameter to set the number of cores per node. \
     If not provided, we use the number of cores on the node that launches \
     the service.
     :param memory: Optional parameter to set the memory requested per node.
     :param disk: Optional parameter to set the disk requested per node.
-    :type leaderMemory: int or string convertable by bd2k.util.humanize.human2bytes to an int
     :type numWorkers: int
+    :type sparkMasterContainer: str
+    :type sparkWorkerContainer: str
+    :type leaderMemory: int or string convertable by bd2k.util.humanize.human2bytes to an int
     :type cores: int
     :type memory: int or string convertable by bd2k.util.humanize.human2bytes to an int
     :type disk: int or string convertable by bd2k.util.humanize.human2bytes to an int
@@ -49,13 +55,15 @@ def spawn_spark_cluster(job,
     if numWorkers < 1:
         raise ValueError("Must have more than one worker. %d given." % numWorkers)
 
-    leaderService = SparkService(cores=cores,
+    leaderService = SparkService(sparkMasterContainer,
+                                 cores=cores,
                                  memory=memory,
                                  disk=disk,
                                  overrideLeaderIP=overrideLeaderIP)
     leaderIP = job.addService(leaderService)
     for i in range(numWorkers):
         job.addService(WorkerService(leaderIP,
+                                     sparkWorkerContainer,
                                      cores=cores,
                                      disk=disk,
                                      memory=memory),
@@ -98,16 +106,19 @@ class SparkService(Job.Service):
     """
 
     def __init__(self,
+                 sparkContainer,
                  memory=None,
                  disk=None,
                  cores=None,
                  overrideLeaderIP=None):
         """
+        :param sparkContainer: The Docker container name to run for Spark.
         :param memory: The amount of memory to be requested for the Spark leader. Optional.
         :param disk: The amount of disk to be requested for the Spark leader. Optional.
         :param cores: Optional parameter to set the number of cores per node. \
         If not provided, we use the number of cores on the node that launches \
         the service.
+        :type sparkContainer: str
         :type memory: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type disk: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type cores: int
@@ -117,6 +128,7 @@ class SparkService(Job.Service):
             cores = multiprocessing.cpu_count()
 
         self.hostname = overrideLeaderIP
+        self.sparkContainer = sparkContainer
 
         Job.Service.__init__(self, memory=memory, cores=cores, disk=disk)
 
@@ -135,9 +147,10 @@ class SparkService(Job.Service):
         self.sparkContainerID = dockerCheckOutput(job=job,
                                                   defer=STOP,
                                                   workDir=os.getcwd(),
-                                                  tool="quay.io/ucsc_cgl/apache-spark-master:1.5.2",
+                                                  tool=self.sparkContainer,
                                                   dockerParameters=["--net=host",
                                                                     "-d",
+                                                                    "-v", "/var/run/docker.sock:/var/run/docker.sock",
                                                                     "-v", "/mnt/ephemeral/:/ephemeral/:rw",
                                                                     "-e", "SPARK_MASTER_IP=" + self.hostname,
                                                                     "-e", "SPARK_LOCAL_DIRS=/ephemeral/spark/local",
@@ -188,19 +201,24 @@ class WorkerService(Job.Service):
     Should not be called outside of `SparkService`.
     """
     
-    def __init__(self, masterIP, memory=None, cores=None, disk=None):
+    def __init__(self, masterIP, sparkContainer, memory=None, cores=None, disk=None):
         """
+        :param masterIP: The IP of the Spark master.
+        :param sparkContainer: The container to run for Spark.
         :param memory: The memory requirement for each node in the cluster. Optional.
         :param disk: The disk requirement for each node in the cluster. Optional.
         :param cores: Optional parameter to set the number of cores per node. \
         If not provided, we use the number of cores on the node that launches \
         the service.
+        :type masterIP: str
+        :type sparkContainer: str
         :type memory: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type disk: int or string convertable by bd2k.util.humanize.human2bytes to an int
         :type cores: int
         """
 
         self.masterIP = masterIP
+        self.sparkContainer = sparkContainer
 
         if cores is None:
             cores = multiprocessing.cpu_count()
@@ -219,9 +237,10 @@ class WorkerService(Job.Service):
         self.sparkContainerID = dockerCheckOutput(job=job,
                                                   defer=STOP,
                                                   workDir=os.getcwd(),
-                                                  tool="quay.io/ucsc_cgl/apache-spark-worker:1.5.2",
+                                                  tool=self.sparkContainer,
                                                   dockerParameters=["--net=host",
                                                                     "-d",
+                                                                    "-v", "/var/run/docker.sock:/var/run/docker.sock",
                                                                     "-v", "/mnt/ephemeral/:/ephemeral/:rw",
                                                                     "-e",
                                                                     "\"SPARK_MASTER_IP=" + self.masterIP + ":" + _SPARK_MASTER_PORT + "\"",

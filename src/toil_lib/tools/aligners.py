@@ -1,8 +1,11 @@
 import os
 import subprocess
+import time
 
 from toil.lib.docker import dockerCall
 
+from toil_lib import require
+from toil_lib.tools import log_runtime
 from toil_lib.urls import download_url
 
 
@@ -82,7 +85,11 @@ def run_star(job, r1_id, r2_id, star_index_url, wiggle=False, sort=True):
         return transcriptome_id, aligned_id, log_id, sj_id
 
 
-def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
+def run_bwakit(job, config,
+               sort=True,
+               trim=False,
+               mark_secondary=False,
+               benchmarking=False):
     """
     Runs BWA-Kit to align single or paired-end fastq files or realign SAM/BAM files.
 
@@ -118,6 +125,8 @@ def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     :param bool sort: If True, sorts the BAM
     :param bool trim: If True, performs adapter trimming
     :param bool mark_secondary: If True, mark shorter split reads as secondary
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
     :return: FileStoreID of BAM
     :rtype: str
     """
@@ -180,9 +189,165 @@ def run_bwakit(job, config, sort=True, trim=False, mark_secondary=False):
     for sample in samples:
         parameters.append('/data/{}'.format(sample))
 
+    start_time = time.time()
     dockerCall(job=job, tool='quay.io/ucsc_cgl/bwakit:0.7.12--c85ccff267d5021b75bb1c9ccf5f4b79f91835cc',
                parameters=parameters, workDir=work_dir)
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'bwakit')
 
     # Either write file to local output directory or upload to S3 cloud storage
     job.fileStore.logToMaster('Aligned sample: {}'.format(config.uuid))
-    return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'aligned.aln.bam'))
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'aligned.aln.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        return bam_id
+
+
+def run_bowtie2(job,
+                read1,
+                index_ids,
+                read2=None,
+                benchmarking=False):
+    '''
+    Runs bowtie2 for alignment.
+
+    :param JobFunctionWrappingJob job: passed automatically by Toil.
+    :param str read1: The FileStoreID of the first-of-pair file.
+    :param str name1: The FileStoreID of the NAME.1.bt2 index file.
+    :param str name2: The FileStoreID of the NAME.2.bt2 index file.
+    :param str name3: The FileStoreID of the NAME.3.bt2 index file.
+    :param str name4: The FileStoreID of the NAME.4.bt2 index file.
+    :param str rev1: The FileStoreID of the NAME.rev.1.bt2 index file.
+    :param str rev2: The FileStoreID of the NAME.rev.2.bt2 index file.
+    :param str ref: The reference FASTA FileStoreID.
+    :param str read2: The (optional) FileStoreID of the first-of-pair file.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
+    '''
+    work_dir = job.fileStore.getLocalTempDir()
+    file_ids = [ref, read1]
+    file_ids.extend(index_ids)
+    file_names = ['ref.fa', 'read1.fq',
+                  'ref.1.bt2', 'ref.2.bt2', 'ref.3.bt2', 'ref.4.bt2',
+                  'ref.rev.1.bt2', 'ref.rev.2.bt2']
+
+    parameters = ['-x', '/data/ref',
+                  '-1', '/data/read1.fq',
+                  '-S', '/data/sample.sam',
+                  '-t', str(job.cores)]
+
+    if read2:
+        file_ids.append(read2)
+        file_names.append('read2.fq')
+        parameters.extend(['-2', '/data/read2.fq'])
+    for file_store_id, name in zip(file_ids, file_names):
+        job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
+
+    start_time = time.time()
+    dockerCall(job=job,
+               workDir=work_dir,
+               parameters=parameters,
+               tool='quay.io/ucsc_cgl/bowtie2')
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'bowtie2')
+
+    sam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.sam'))
+    if benchmarking:
+        return (sam_id, (end_time - start_time))
+    else:
+        return sam_id
+
+
+def run_snap(job,
+             read1,
+             index_ids,
+             read2=None,
+             sort=False,
+             mark_duplicates=False,
+             benchmarking=False):
+    '''
+    Runs SNAP for alignment.
+
+    If both first- and second-of-pair reads are passed, runs in paired mode.
+    Else runs in single mode.
+
+    :param JobFunctionWrappingJob job: passed automatically by Toil.
+    :param str read1: The FileStoreID of the first-of-pair file.
+    :param str genome: The FileStoreID of the SNAP Genome index.
+    :param str genome_index: The FileStoreID of the SNAP GenomeIndex index.
+    :param str genome_hash: The FileStoreID of the SNAP GenomeIndexHash index.
+    :param str overflow: The FileStoreID of the SNAP OverflowTable index.
+    :param str ref: The reference FASTA FileStoreID.
+    :param str read2: The (optional) FileStoreID of the first-of-pair file.
+    :param boolean sort: If true, sorts the reads. Defaults to false. If enabled,
+      this function will also return the BAM Index.
+    :param boolean mark_duplicates: If true, marks reads as duplicates. Defaults
+      to false. This option is only valid if sort is True.
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
+    '''
+    work_dir = job.fileStore.getLocalTempDir()
+    file_ids = [read1]
+    file_ids.extend(
+    file_names = ['read1.fq',
+                  'Genome',
+                  'GenomeIndex',
+                  'GenomeIndexHash',
+                  'OverflowTable']
+
+    if read2:
+        file_ids.append(read2)
+        file_names.append('read2.fq')
+
+        parameters = ['paired'
+                      '/data/',
+                      '/data/read1.fq',
+                      '/data/read2.fq',
+                      '-o', '-bam', '/data/sample.bam',
+                      '-t', str(job.cores)]
+    else:
+
+        parameters = ['single'
+                      '/data/',
+                      '/data/read1.fq',
+                      '-o', '-bam', '/data/sample.bam',
+                      '-t', str(job.cores)]
+
+    if sort:
+        
+        parameters.append('-so')
+
+        if not mark_duplicates:
+            parameters.extend(['-S', 'd'])
+
+    else:
+
+        require(not mark_duplicates,
+                'Cannot run duplicate marking if sort is not enabled.')
+        
+    for file_store_id, name in zip(file_ids, file_names):
+        job.fileStore.readGlobalFile(file_store_id, os.path.join(work_dir, name))
+
+    start_time = time.time()
+    dockerCall(job=job,
+               workDir=work_dir,
+               parameters=parameters,
+               tool='quay.io/ucsc_cgl/snap')
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'snap (sort={}, dm={})'.format(sort,
+                                                                          mark_duplicates))
+
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam'))
+    if not sort:
+        if benchmarking:
+            return (bam_id, (end_time - start_time))
+        else:
+            return bam_id
+    else:
+        bai_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
+        if benchmarking:
+            return (bam_id, bai_id, (end_time - start_time))
+        else:
+            return (bam_id, bai_id)
+                

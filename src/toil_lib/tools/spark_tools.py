@@ -8,10 +8,12 @@ ADAM/Spark pipeline
 
 import os.path
 from subprocess import check_call
+import time
 
 from toil.lib.docker import dockerCall
 
 from toil_lib import require
+from toil_lib.tools import log_runtime
 
 SPARK_MASTER_PORT = "7077"
 HDFS_MASTER_PORT = "8020"
@@ -95,7 +97,12 @@ def _make_parameters(master_ip, default_parameters, memory, arguments, override_
     return parameters        
     
 
-def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=None):
+def call_conductor(job,
+                   master_ip,
+                   src,
+                   dst,
+                   container="quay.io/ucsc_cgl/conductor",
+                   memory=None, override_parameters=None):
     """
     Invokes the Conductor container to copy files between S3 and HDFS and vice versa.
     Find Conductor at https://github.com/BD2KGenomics/conductor.
@@ -103,13 +110,15 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
     :param toil.Job.job job: The Toil Job calling this function
     :param masterIP: The Spark leader IP address.
     :param src: URL of file to copy.
-    :param src: URL of location to copy file to.
+    :param dst: URL of location to copy file to.
+    :param container: The container name to run.
     :param memory: Gigabytes of memory to provision for Spark driver/worker.
     :param override_parameters: Parameters passed by the user, that override our defaults.
 
     :type masterIP: MasterAddress
     :type src: string
     :type dst: string
+    :type container: string
     :type memory: int or None
     :type override_parameters: list of string or None
     """
@@ -118,7 +127,7 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
 
     docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
     dockerCall(job=job,
-                tool="quay.io/ucsc_cgl/conductor",
+                tool=container,
                 parameters=_make_parameters(master_ip,
                                             [], # no conductor specific spark configuration
                                             memory,
@@ -128,16 +137,19 @@ def call_conductor(job, master_ip, src, dst, memory=None, override_parameters=No
 
 
 def call_adam(job, master_ip, arguments,
+              container="quay.io/ucsc_cgl/adam:0.22.0--7add8b306862902b2bdd28a991e4e8dbc5292504",
               memory=None,
               override_parameters=None,
               run_local=False,
-              native_adam_path=None):
+              native_adam_path=None,
+              benchmarking=False):
     """
     Invokes the ADAM container. Find ADAM at https://github.com/bigdatagenomics/adam.
 
     :param toil.Job.job job: The Toil Job calling this function
     :param masterIP: The Spark leader IP address.
     :param arguments: Arguments to pass to ADAM.
+    :param container: The container name to run.
     :param memory: Gigabytes of memory to provision for Spark driver/worker.
     :param override_parameters: Parameters passed by the user, that override our defaults.
     :param native_adam_path: Path to ADAM executable. If not provided, Docker is used.
@@ -146,6 +158,7 @@ def call_adam(job, master_ip, arguments,
 
     :type masterIP: MasterAddress
     :type arguments: list of string
+    :type container: string
     :type memory: int or None
     :type override_parameters: list of string or None
     :type native_adam_path: string or None
@@ -178,16 +191,127 @@ def call_adam(job, master_ip, arguments,
     # are we running adam via docker, or do we have a native path?
     if native_adam_path is None:
         docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+        start_time = time.time()
         dockerCall(job=job,
-                    tool="quay.io/ucsc_cgl/adam:962-ehf--6e7085f8cac4b9a927dc9fb06b48007957256b80",
-                    dockerParameters=docker_parameters,
-                    parameters=_make_parameters(master_ip,
-                                                default_params,
-                                                memory,
-                                                arguments,
-                                                override_parameters))
+                   tool=container,
+                   dockerParameters=docker_parameters,
+                   parameters=_make_parameters(master_ip,
+                                               default_params,
+                                               memory,
+                                               arguments,
+                                               override_parameters))
+        end_time = time.time()
+        log_runtime(job, start_time, end_time, 'adam')
+        
+        if benchmarking:
+            return (end_time - start_time)
+
     else:
         check_call([os.path.join(native_adam_path, "bin/adam-submit")] +
                    default_params +
                    arguments)
+
+
+def call_avocado(job, master_ip, arguments,
+                 container="quay.io/ucsc_cgl/avocado:fb20657172d2ce38e5dcd5542b0915db4de7eaa0--036b9354dbd46e62c4d326b4308c4786fc966d6a",
+                 memory=None,
+                 override_parameters=None,
+                 run_local=False,
+                 benchmarking=False):
+    """
+    Invokes the Avocado container. Find Avocado at https://github.com/bigdatagenomics/avocado.
+
+    :param toil.Job.job job: The Toil Job calling this function
+    :param masterIP: The Spark leader IP address.
+    :param arguments: Arguments to pass to Avocado.
+    :param container: The container name to run.
+    :param memory: Gigabytes of memory to provision for Spark driver/worker.
+    :param override_parameters: Parameters passed by the user, that override our defaults.
+    :param run_local: If true, runs Spark with the --master local[*] setting, which uses
+      all cores on the local machine. The master_ip will be disregarded.
+
+    :type masterIP: MasterAddress
+    :type arguments: list of string
+    :type container: string
+    :type memory: int or None
+    :type override_parameters: list of string or None
+    :type run_local: boolean
+    """
+    if run_local:
+        master = ["--master", "local[*]"]
+    else:
+        master = ["--master",
+                  ("spark://%s:%s" % (master_ip, SPARK_MASTER_PORT)),
+                  "--conf", ("spark.hadoop.fs.default.name=hdfs://%s:%s" % (master_ip, HDFS_MASTER_PORT)),]
+
+    default_params = (master + [
+            # set max result size to unlimited, see #177
+            "--conf", "spark.driver.maxResultSize=0",
+            "--conf", "spark.kryoserializer.buffer.max=2047m"
+            ])
+
+    docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    start_time = time.time()
+    dockerCall(job=job,
+               tool=container,
+               dockerParameters=docker_parameters,
+               parameters=_make_parameters(master_ip,
+                                           default_params,
+                                           memory,
+                                           arguments,
+                                           override_parameters))
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'adam')
+    
+    if benchmarking:
+        return (end_time - start_time)
+
+
+def call_cannoli(job, master_ip, arguments,
+                 container="quay.io/ucsc_cgl/cannoli:0a9321a382fdfad1411cb308a0de1566bf4c8bb4--036b9354dbd46e62c4d326b4308c4786fc966d6a",
+                 memory=None,
+                 override_parameters=None,
+                 run_local=False
+                 benchmarking=False):
+    """
+    Invokes the Cannoli container. Find Cannoli at https://github.com/bigdatagenomics/cannoli.
+
+    :param toil.Job.job job: The Toil Job calling this function
+    :param masterIP: The Spark leader IP address.
+    :param arguments: Arguments to pass to Cannoli.
+    :param container: The container name to run.
+    :param memory: Gigabytes of memory to provision for Spark driver/worker.
+    :param override_parameters: Parameters passed by the user, that override our defaults.
+    :param run_local: If true, runs Spark with the --master local[*] setting, which uses
+      all cores on the local machine. The master_ip will be disregarded.
+
+    :type masterIP: MasterAddress
+    :type arguments: list of string
+    :type container: string
+    :type memory: int or None
+    :type override_parameters: list of string or None
+    :type run_local: boolean
+    """
+    if run_local:
+        master = ["--master", "local[*]"]
+    else:
+        master = ["--master",
+                  ("spark://%s:%s" % (master_ip, SPARK_MASTER_PORT)),
+                  "--conf", ("spark.hadoop.fs.default.name=hdfs://%s:%s" % (master_ip, HDFS_MASTER_PORT)),]
+
+    docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    start_time = time.time()
+    dockerCall(job=job,
+               tool=container,
+               dockerParameters=docker_parameters,
+               parameters=_make_parameters(master_ip,
+                                           master,
+                                           memory,
+                                           arguments,
+                                           override_parameters))
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'adam')
+    
+    if benchmarking:
+        return (end_time - start_time)
 
