@@ -141,7 +141,8 @@ def call_adam(job, master_ip, arguments,
               memory=None,
               override_parameters=None,
               run_local=False,
-              native_adam_path=None):
+              native_adam_path=None,
+              benchmarking=False):
     """
     Invokes the ADAM container. Find ADAM at https://github.com/bigdatagenomics/adam.
 
@@ -190,14 +191,21 @@ def call_adam(job, master_ip, arguments,
     # are we running adam via docker, or do we have a native path?
     if native_adam_path is None:
         docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+        start_time = time.time()
         dockerCall(job=job,
-                    tool=container,
-                    dockerParameters=docker_parameters,
-                    parameters=_make_parameters(master_ip,
-                                                default_params,
-                                                memory,
-                                                arguments,
-                                                override_parameters))
+                   tool=container,
+                   dockerParameters=docker_parameters,
+                   parameters=_make_parameters(master_ip,
+                                               default_params,
+                                               memory,
+                                               arguments,
+                                               override_parameters))
+        end_time = time.time()
+        log_runtime(job, start_time, end_time, 'adam')
+        
+        if benchmarking:
+            return (end_time - start_time)
+
     else:
         check_call([os.path.join(native_adam_path, "bin/adam-submit")] +
                    default_params +
@@ -208,7 +216,8 @@ def call_avocado(job, master_ip, arguments,
                  container="quay.io/ucsc_cgl/avocado:fb20657172d2ce38e5dcd5542b0915db4de7eaa0--036b9354dbd46e62c4d326b4308c4786fc966d6a",
                  memory=None,
                  override_parameters=None,
-                 run_local=False):
+                 run_local=False,
+                 benchmarking=False):
     """
     Invokes the Avocado container. Find Avocado at https://github.com/bigdatagenomics/avocado.
 
@@ -242,6 +251,7 @@ def call_avocado(job, master_ip, arguments,
             ])
 
     docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    start_time = time.time()
     dockerCall(job=job,
                tool=container,
                dockerParameters=docker_parameters,
@@ -250,13 +260,19 @@ def call_avocado(job, master_ip, arguments,
                                            memory,
                                            arguments,
                                            override_parameters))
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'adam')
+    
+    if benchmarking:
+        return (end_time - start_time)
 
 
 def call_cannoli(job, master_ip, arguments,
                  container="quay.io/ucsc_cgl/cannoli:0a9321a382fdfad1411cb308a0de1566bf4c8bb4--036b9354dbd46e62c4d326b4308c4786fc966d6a",
                  memory=None,
                  override_parameters=None,
-                 run_local=False):
+                 run_local=False
+                 benchmarking=False):
     """
     Invokes the Cannoli container. Find Cannoli at https://github.com/bigdatagenomics/cannoli.
 
@@ -284,6 +300,7 @@ def call_cannoli(job, master_ip, arguments,
                   "--conf", ("spark.hadoop.fs.default.name=hdfs://%s:%s" % (master_ip, HDFS_MASTER_PORT)),]
 
     docker_parameters = ['--log-driver', 'none', master_ip.docker_parameters(["--net=host"])]
+    start_time = time.time()
     dockerCall(job=job,
                tool=container,
                dockerParameters=docker_parameters,
@@ -292,4 +309,9 @@ def call_cannoli(job, master_ip, arguments,
                                            memory,
                                            arguments,
                                            override_parameters))
+    end_time = time.time()
+    log_runtime(job, start_time, end_time, 'adam')
+    
+    if benchmarking:
+        return (end_time - start_time)
 
