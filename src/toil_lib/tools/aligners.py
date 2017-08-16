@@ -206,7 +206,7 @@ def run_bwakit(job, config,
 
 def run_bowtie2(job,
                 read1,
-                name1, name2, name3, name4, rev1, rev2, ref,
+                index_ids,
                 read2=None,
                 benchmarking=False):
     '''
@@ -226,9 +226,8 @@ def run_bowtie2(job,
       FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
-    file_ids = [ref, read1,
-                name1, name2, name3, name4,
-                rev1, rev2]
+    file_ids = [ref, read1]
+    file_ids.extend(index_ids)
     file_names = ['ref.fa', 'read1.fq',
                   'ref.1.bt2', 'ref.2.bt2', 'ref.3.bt2', 'ref.4.bt2',
                   'ref.rev.1.bt2', 'ref.rev.2.bt2']
@@ -262,7 +261,7 @@ def run_bowtie2(job,
 
 def run_snap(job,
              read1,
-             genome, genome_index, genome_hash, overflow,
+             index_ids,
              read2=None,
              sort=False,
              mark_duplicates=False,
@@ -289,21 +288,20 @@ def run_snap(job,
       FileStoreID.
     '''
     work_dir = job.fileStore.getLocalTempDir()
-    os.mkdir(os.path.join(work_dir, 'snap'))
-    file_ids = [read1,
-                genome, genome_index, genome_hash, overflow]
+    file_ids = [read1]
+    file_ids.extend(
     file_names = ['read1.fq',
-                  'snap/Genome',
-                  'snap/GenomeIndex',
-                  'snap/GenomeIndexHash',
-                  'snap/OverflowTable']
+                  'Genome',
+                  'GenomeIndex',
+                  'GenomeIndexHash',
+                  'OverflowTable']
 
     if read2:
         file_ids.append(read2)
         file_names.append('read2.fq')
 
         parameters = ['paired'
-                      '/data/snap',
+                      '/data/',
                       '/data/read1.fq',
                       '/data/read2.fq',
                       '-o', '-bam', '/data/sample.bam',
@@ -311,7 +309,7 @@ def run_snap(job,
     else:
 
         parameters = ['single'
-                      '/data/snap',
+                      '/data/',
                       '/data/read1.fq',
                       '-o', '-bam', '/data/sample.bam',
                       '-t', str(job.cores)]
