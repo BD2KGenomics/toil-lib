@@ -224,6 +224,41 @@ def run_sambamba_index(job, bam,
         bai_id
 
 
+def run_sambamba_view(job, sam,
+                      benchmarking=False):
+    """
+    Converts a SAM file to BAM using Sambamba.
+
+    :param JobFunctionWrappingJob job: passed automatically by Toil
+    :param str sam: FileStoreID for SAM file
+    :param boolean benchmarking: If true, returns the runtime along with the
+      FileStoreID.
+    :return: FileStoreID for BAM file
+    :rtype: str
+    """
+    work_dir = job.fileStore.getLocalTempDir()
+    job.fileStore.readGlobalFile(sam, os.path.join(work_dir, 'input.sam'))
+    command = ['/usr/local/bin/sambamba',
+               'view',
+               '-t', str(int(job.cores)),
+               '-S', '/data/input.sam',
+               '-f', 'bam',
+               '-o', '/data/input.bam']
+
+    start_time = time.time()
+    dockerCall(job=job, workDir=work_dir,
+               parameters=command,
+               tool='quay.io/biocontainers/sambamba:0.6.6--0')
+    end_time = time.time()
+    _log_runtime(job, start_time, end_time, "sambamba view")
+    
+    bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'input.bam'))
+    if benchmarking:
+        return (bam_id, (end_time - start_time))
+    else:
+        bam_id
+
+
 def run_sambamba_sort(job, bam,
                       sort_by_name=False,
                       benchmarking=False):
